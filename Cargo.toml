@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/object-core",
+    "crates/chunkstore",
+    "crates/manifest",
+    "crates/object-store",
+    "crates/stream",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/plures/plures-object"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+thiserror = "2"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+bytes = "1"

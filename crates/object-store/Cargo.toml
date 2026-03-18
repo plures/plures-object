@@ -1,0 +1,17 @@
+[package]
+name = "plures-object-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+plures-object-core = { path = "../object-core" }
+plures-chunkstore = { path = "../chunkstore" }
+plures-manifest = { path = "../manifest" }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
