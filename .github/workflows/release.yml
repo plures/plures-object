@@ -1,0 +1,15 @@
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        type: choice
+        options: [patch, minor, major]
+jobs:
+  release:
+    uses: plures/.github/.github/workflows/release-reusable.yml@main
+    with:
+      bump: ${{ inputs.bump || '' }}
+    secrets: inherit
