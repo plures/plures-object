@@ -77,7 +77,11 @@ jobs:
               const allGreen = allDone && (relevant.length === 0 || relevant.every(c =>
                 c.conclusion === 'success' || c.conclusion === 'skipped'
               ));
-              const failing = relevant.filter(c => c.conclusion === 'failure');
+              const failing = relevant.filter(c =>
+                c.status === 'completed' &&
+                c.conclusion !== 'success' &&
+                c.conclusion !== 'skipped'
+              );
 
               // Check reviews
               const reviews = await github.rest.pulls.listReviews({
