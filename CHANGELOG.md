@@ -1,3 +1,8 @@
+## [0.2.1] — 2026-03-28
+
+- fix: add packages:write + id-token:write to release workflow (f7c4235)
+- docs: add ROADMAP.md (abb133a)
+
 # Changelog
 
 ## [0.2.0] — 2026-03-27
