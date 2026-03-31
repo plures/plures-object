@@ -1,3 +1,9 @@
+## [0.2.2] — 2026-03-31
+
+- fix(lifecycle): rewrite v9 — apply suggestions, merge, no nudges (ccba4ac)
+- chore: standardize license to MIT (4c0fa37)
+- chore: standardize copilot-pr-lifecycle.yml to canonical version (b2329fd)
+
 ## [0.2.1] — 2026-03-28
 
 - fix: add packages:write + id-token:write to release workflow (f7c4235)
