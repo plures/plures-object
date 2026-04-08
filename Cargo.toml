@@ -4,6 +4,7 @@ members = [
     "crates/object-core",
     "crates/chunkstore",
     "crates/manifest",
+    "crates/manifest-db",
     "crates/object-store",
     "crates/stream",
     "crates/object-http",

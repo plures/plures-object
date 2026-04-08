@@ -824,7 +824,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "plures-chunkstore"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -837,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "plures-manifest"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -849,8 +849,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "plures-manifest-db"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "plures-object-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "plures-object-core"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -864,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "plures-object-http"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "axum",
  "bytes",
@@ -885,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "plures-object-store"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -903,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "plures-stream"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "chrono",

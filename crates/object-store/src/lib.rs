@@ -386,6 +386,7 @@ impl ObjectService {
             total_size,
             etag: etag.clone(),
             content_type: None,
+            tags: std::collections::HashMap::new(),
             created_at: now,
             updated_at: now,
         };

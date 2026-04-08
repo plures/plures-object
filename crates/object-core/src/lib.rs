@@ -125,6 +125,12 @@ pub struct Manifest {
     /// Content-Type (MIME) provided at upload time.
     #[serde(default)]
     pub content_type: Option<String>,
+    /// User-defined tags — arbitrary key-value metadata on this object.
+    ///
+    /// Stored as graph node properties in PluresDB and replicated via CRDT sync.
+    /// Equivalent to S3 object tagging.
+    #[serde(default)]
+    pub tags: std::collections::HashMap<String, String>,
     /// When the object was created/last replaced.
     #[serde(default = "chrono::Utc::now")]
     pub created_at: DateTime<Utc>,
@@ -164,6 +170,7 @@ impl Manifest {
             total_size,
             etag,
             content_type,
+            tags: std::collections::HashMap::new(),
             created_at: now,
             updated_at: now,
         }
@@ -332,6 +339,7 @@ mod tests {
             total_size: 300,
             etag: String::new(),
             content_type: None,
+            tags: std::collections::HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
