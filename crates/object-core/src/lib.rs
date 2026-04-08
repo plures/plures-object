@@ -113,7 +113,13 @@ pub struct Manifest {
     pub parts: Vec<ManifestPart>,
     /// Total object size (sum of all part sizes).
     pub total_size: u64,
-    /// ETag of the object (SHA-256 hex for single-part; `{sha256}-{n}` for multipart).
+    /// ETag of the object.
+    ///
+    /// Single-part uploads use the SHA-256 digest as lowercase hex.
+    /// Multipart uploads use `{sha256}-{n}`, where `{sha256}` is the SHA-256-based
+    /// multipart digest and `{n}` is the number of parts.
+    ///
+    /// This is not the S3-style `md5-partcount` multipart ETag format.
     #[serde(default)]
     pub etag: String,
     /// Content-Type (MIME) provided at upload time.

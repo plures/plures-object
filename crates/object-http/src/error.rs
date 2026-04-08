@@ -32,7 +32,7 @@ impl ApiError {
     pub fn conflict(resource: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::CONFLICT,
-            code: "BucketAlreadyExists",
+            code: "OperationAborted",
             message: message.into(),
             resource: resource.into(),
         }
