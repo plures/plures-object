@@ -146,6 +146,45 @@ impl Manifest {
     }
 }
 
+// ── Multipart Upload ────────────────────────────────────────────────────────
+
+/// A part that has been successfully uploaded during a multipart upload session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadedPart {
+    /// Part number (1-indexed, S3 convention).
+    pub part_number: u32,
+    /// ETag — SHA-256 hex of the part's raw bytes.
+    pub etag: String,
+    /// Size of this part in bytes.
+    pub size: u64,
+    /// Chunks composing this part (stored via [`ChunkStorage`]).
+    pub chunk_ids: Vec<ChunkId>,
+}
+
+/// A part reference provided by the caller to `complete_multipart_upload`.
+///
+/// The `etag` must match the value returned by `upload_part`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletePart {
+    /// Part number (1-indexed).
+    pub part_number: u32,
+    /// ETag returned by the corresponding `upload_part` call.
+    pub etag: String,
+}
+
+/// An in-progress multipart upload session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultipartUpload {
+    /// Unique upload identifier (UUID v4).
+    pub upload_id: String,
+    /// Object key being assembled.
+    pub key: ObjectKey,
+    /// When this upload was initiated.
+    pub created_at: DateTime<Utc>,
+    /// Parts uploaded so far, keyed by part number.
+    pub parts: std::collections::HashMap<u32, UploadedPart>,
+}
+
 // ── Storage Traits ──────────────────────────────────────────────────────────
 
 /// Errors from the object storage platform.

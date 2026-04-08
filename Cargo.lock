@@ -364,7 +364,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "plures-chunkstore"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "plures-manifest"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "plures-object-core",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "plures-object-core"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "plures-object-store"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -415,11 +415,12 @@ dependencies = [
  "sha2",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
 name = "plures-stream"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -710,6 +711,17 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "uuid"
+version = "1.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
+dependencies = [
+ "getrandom",
+ "js-sys",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "version_check"
