@@ -1,3 +1,7 @@
+## [0.5.0] — 2026-04-08
+
+- feat: PluresDB metadata backend — graph-native object metadata (#7) (94971d4)
+
 ## [0.4.0] — 2026-04-08
 
 - feat: S3-compatible HTTP API via axum — GET/PUT/DELETE/HEAD/LIST (#6) (87614d5)
