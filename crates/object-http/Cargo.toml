@@ -1,19 +1,25 @@
 [package]
-name = "plures-object-store"
+name = "plures-object-http"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 plures-object-core = { path = "../object-core" }
+plures-object-store = { path = "../object-store" }
 plures-chunkstore = { path = "../chunkstore" }
 plures-manifest = { path = "../manifest" }
-async-trait = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
 tokio = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
-bytes = { workspace = true }
-uuid = { workspace = true }
 futures = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }

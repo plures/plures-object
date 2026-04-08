@@ -74,7 +74,7 @@ impl ObjectService {
         }
 
         // Create manifest
-        let manifest = Manifest::single(key.clone(), chunk_ids.clone(), total_size);
+        let manifest = Manifest::single(key.clone(), chunk_ids.clone(), total_size, etag.clone(), content_type.clone());
         self.manifests.put(manifest).await?;
 
         let now = Utc::now();
@@ -101,18 +101,15 @@ impl ObjectService {
             assembled.extend_from_slice(&chunk.data);
         }
 
-        let etag = hex::encode(Sha256::digest(&assembled));
-        let now = Utc::now();
-
         let meta = ObjectMeta {
             key: key.clone(),
             size: manifest.total_size,
-            content_type: None,
+            content_type: manifest.content_type,
             chunks: all_chunk_ids,
             user_meta: Default::default(),
-            etag,
-            created_at: now,
-            updated_at: now,
+            etag: manifest.etag,
+            created_at: manifest.created_at,
+            updated_at: manifest.updated_at,
         };
 
         Ok((meta, bytes::Bytes::from(assembled)))
@@ -136,18 +133,90 @@ impl ObjectService {
     pub async fn head_object(&self, key: &ObjectKey) -> Result<ObjectMeta, ObjectError> {
         let manifest = self.manifests.get(key).await?;
         let all_chunk_ids: Vec<ChunkId> = manifest.all_chunks().into_iter().cloned().collect();
-        let now = Utc::now();
 
         Ok(ObjectMeta {
             key: key.clone(),
             size: manifest.total_size,
-            content_type: None,
+            content_type: manifest.content_type,
             chunks: all_chunk_ids,
             user_meta: Default::default(),
-            etag: String::new(), // Would need to reassemble to compute
-            created_at: now,
-            updated_at: now,
+            etag: manifest.etag,
+            created_at: manifest.created_at,
+            updated_at: manifest.updated_at,
         })
+    }
+
+    /// **StreamObject** — retrieve an object as a chunk-by-chunk async stream.
+    ///
+    /// Returns the object metadata and a [`futures::Stream`] that yields each
+    /// chunk's bytes sequentially without buffering the entire object in memory.
+    /// Callers are responsible for collecting or forwarding the stream.
+    pub async fn stream_object(
+        &self,
+        key: &ObjectKey,
+    ) -> Result<
+        (
+            ObjectMeta,
+            impl futures::Stream<Item = Result<bytes::Bytes, ObjectError>> + Send + 'static,
+        ),
+        ObjectError,
+    > {
+        use futures::StreamExt as _;
+
+        let manifest = self.manifests.get(key).await?;
+        let all_chunk_ids: Vec<ChunkId> = manifest.all_chunks().into_iter().cloned().collect();
+
+        let meta = ObjectMeta {
+            key: key.clone(),
+            size: manifest.total_size,
+            content_type: manifest.content_type,
+            chunks: all_chunk_ids.clone(),
+            user_meta: Default::default(),
+            etag: manifest.etag,
+            created_at: manifest.created_at,
+            updated_at: manifest.updated_at,
+        };
+
+        let chunks = self.chunks.clone();
+        let stream = futures::stream::iter(all_chunk_ids).then(move |chunk_id| {
+            let chunks = chunks.clone();
+            async move { chunks.get(&chunk_id).await.map(|c| c.data) }
+        });
+
+        Ok((meta, stream))
+    }
+
+    /// **ListObjectsWithMeta** — list objects with full metadata (for S3 API responses).
+    ///
+    /// Fetches metadata for each matching key by reading its manifest. An
+    /// optional `max_keys` limit is applied after prefix filtering.
+    ///
+    /// Returns `(objects, is_truncated)` where `is_truncated` is `true` when
+    /// more objects exist beyond `max_keys`.
+    pub async fn list_objects_with_meta(
+        &self,
+        prefix: Option<&str>,
+        max_keys: Option<usize>,
+    ) -> Result<(Vec<ObjectMeta>, bool), ObjectError> {
+        let keys = self.manifests.list(prefix).await?;
+        let limit = max_keys.unwrap_or(1000);
+        // Fetch one extra to determine whether results are truncated.
+        let mut metas = Vec::new();
+        let mut is_truncated = false;
+        for key in keys.into_iter() {
+            if metas.len() == limit {
+                // We have already collected the page; the extra item proves truncation.
+                is_truncated = true;
+                break;
+            }
+            match self.head_object(&key).await {
+                Ok(meta) => metas.push(meta),
+                // A concurrent delete between list and head is benign — skip silently.
+                Err(ObjectError::NotFound(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok((metas, is_truncated))
     }
 
     // ── Multipart Upload ─────────────────────────────────────────────────────
@@ -310,14 +379,18 @@ impl ObjectService {
             .flat_map(|p| p.chunks.iter().cloned())
             .collect();
 
+        let now = Utc::now();
         let manifest = Manifest {
             key: upload.key.clone(),
             parts: manifest_parts,
             total_size,
+            etag: etag.clone(),
+            content_type: None,
+            created_at: now,
+            updated_at: now,
         };
         self.manifests.put(manifest).await?;
 
-        let now = Utc::now();
         Ok(ObjectMeta {
             key: upload.key,
             size: total_size,
