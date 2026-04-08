@@ -1,3 +1,7 @@
+## [0.4.0] — 2026-04-08
+
+- feat: S3-compatible HTTP API via axum — GET/PUT/DELETE/HEAD/LIST (#6) (87614d5)
+
 ## [0.3.0] — 2026-04-08
 
 - feat: multipart upload support — chunked upload for large objects (#5) (1090f03)
