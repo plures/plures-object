@@ -84,6 +84,7 @@ mod tests {
             total_size: 1024,
             etag: "abc123etag".into(),
             content_type: None,
+            tags: std::collections::HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
