@@ -1,3 +1,11 @@
+## [0.3.0] — 2026-04-08
+
+- feat: multipart upload support — chunked upload for large objects (#5) (1090f03)
+- ci: inline lifecycle workflow — fix schedule failures (79bf15b)
+- ci: tech-doc-writer triggers on minor prerelease only [actions-optimization] (c257edf)
+- ci: add concurrency group to copilot-pr-lifecycle [actions-optimization] (969ec3c)
+- ci: centralize lifecycle — event-driven with schedule guard (7750ac7)
+
 ## [0.2.5] — 2026-04-01
 
 - fix(lifecycle): v9.2 — process all PRs per tick (return→continue), widen bot filter (4f331b0)
