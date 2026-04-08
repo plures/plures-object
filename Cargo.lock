@@ -364,7 +364,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "plures-chunkstore"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "plures-manifest"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "plures-object-core",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "plures-object-core"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "plures-object-store"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "plures-stream"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "chrono",
