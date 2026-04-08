@@ -265,6 +265,14 @@ impl ObjectService {
         let mut complete_parts = parts;
         complete_parts.sort_by_key(|p| p.part_number);
 
+        for pair in complete_parts.windows(2) {
+            if pair[0].part_number == pair[1].part_number {
+                return Err(ObjectError::InvalidRequest(format!(
+                    "duplicate part number {}",
+                    pair[0].part_number
+                )));
+            }
+        }
         let mut manifest_parts: Vec<ManifestPart> = Vec::with_capacity(complete_parts.len());
         let mut total_size = 0u64;
         let mut etag_concat = String::new();

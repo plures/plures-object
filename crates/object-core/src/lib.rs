@@ -161,12 +161,9 @@ pub struct UploadedPart {
     pub chunk_ids: Vec<ChunkId>,
 }
 
-/// A part reference provided by the caller to [`CompleteMultipartUpload`].
+/// A part reference provided by the caller to `complete_multipart_upload`.
 ///
-/// The `etag` must match the value returned by [`UploadPart`].
-///
-/// [`CompleteMultipartUpload`]: crate
-/// [`UploadPart`]: crate
+/// The `etag` must match the value returned by `upload_part`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletePart {
     /// Part number (1-indexed).
