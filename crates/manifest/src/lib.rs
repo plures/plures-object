@@ -82,6 +82,10 @@ mod tests {
                 size: 1024,
             }],
             total_size: 1024,
+            etag: "abc123etag".into(),
+            content_type: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         }
     }
 

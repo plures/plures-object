@@ -6,6 +6,7 @@ members = [
     "crates/manifest",
     "crates/object-store",
     "crates/stream",
+    "crates/object-http",
 ]
 
 [workspace.package]
@@ -26,3 +27,9 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 bytes = "1"
+futures = "0.3"
+axum = { version = "0.8", features = ["tokio"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tempfile = "3"

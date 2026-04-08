@@ -113,6 +113,18 @@ pub struct Manifest {
     pub parts: Vec<ManifestPart>,
     /// Total object size (sum of all part sizes).
     pub total_size: u64,
+    /// ETag of the object (SHA-256 hex for single-part; `{sha256}-{n}` for multipart).
+    #[serde(default)]
+    pub etag: String,
+    /// Content-Type (MIME) provided at upload time.
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// When the object was created/last replaced.
+    #[serde(default = "chrono::Utc::now")]
+    pub created_at: DateTime<Utc>,
+    /// When the object was last modified.
+    #[serde(default = "chrono::Utc::now")]
+    pub updated_at: DateTime<Utc>,
 }
 
 /// A single part in a multipart manifest.
@@ -128,7 +140,14 @@ pub struct ManifestPart {
 
 impl Manifest {
     /// Create a manifest for a single-part object.
-    pub fn single(key: ObjectKey, chunks: Vec<ChunkId>, total_size: u64) -> Self {
+    pub fn single(
+        key: ObjectKey,
+        chunks: Vec<ChunkId>,
+        total_size: u64,
+        etag: String,
+        content_type: Option<String>,
+    ) -> Self {
+        let now = chrono::Utc::now();
         Self {
             key,
             parts: vec![ManifestPart {
@@ -137,6 +156,10 @@ impl Manifest {
                 size: total_size,
             }],
             total_size,
+            etag,
+            content_type,
+            created_at: now,
+            updated_at: now,
         }
     }
 
@@ -286,7 +309,7 @@ mod tests {
 
     #[test]
     fn manifest_single_creates_one_part() {
-        let m = Manifest::single("test/obj".into(), vec![ChunkId("abc".into())], 100);
+        let m = Manifest::single("test/obj".into(), vec![ChunkId("abc".into())], 100, "etag".into(), None);
         assert_eq!(m.parts.len(), 1);
         assert_eq!(m.parts[0].part_number, 1);
         assert_eq!(m.total_size, 100);
@@ -301,6 +324,10 @@ mod tests {
                 ManifestPart { part_number: 2, chunks: vec![ChunkId("c".into())], size: 100 },
             ],
             total_size: 300,
+            etag: String::new(),
+            content_type: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
         let all = m.all_chunks();
         assert_eq!(all.len(), 3);
