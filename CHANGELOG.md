@@ -1,3 +1,7 @@
+## [0.5.1] — 2026-04-17
+
+- fix(lifecycle): label-based retry counter + CI fix priority (f035ca8)
+
 ## [0.5.0] — 2026-04-08
 
 - feat: PluresDB metadata backend — graph-native object metadata (#7) (94971d4)
