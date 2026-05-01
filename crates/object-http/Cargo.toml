@@ -9,6 +9,7 @@ plures-object-core = { path = "../object-core" }
 plures-object-store = { path = "../object-store" }
 plures-chunkstore = { path = "../chunkstore" }
 plures-manifest = { path = "../manifest" }
+plures-manifest-db = { path = "../manifest-db" }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }

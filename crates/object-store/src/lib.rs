@@ -46,6 +46,23 @@ impl ObjectService {
         self
     }
 
+    /// Create an ObjectService with PluresDB-backed manifest storage.
+    ///
+    /// Uses [`plures_manifest_db::FsManifestStore`] for graph-native manifest
+    /// persistence with CRDT semantics and version history.
+    pub async fn with_pluresdb(
+        chunks: Arc<dyn ChunkStorage>,
+        db_path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, ObjectError> {
+        let store = plures_manifest_db::FsManifestStore::new(db_path);
+        Ok(Self {
+            chunks,
+            manifests: Arc::new(store),
+            chunk_size: DEFAULT_CHUNK_SIZE,
+            staging: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
     /// **PutObject** — store an object, splitting into content-addressed chunks.
     ///
     /// Returns the object metadata including the ETag (SHA-256 of full content).
