@@ -1,0 +1,21 @@
+[package]
+name = "plures-object-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "plures-object"
+path = "src/main.rs"
+
+[dependencies]
+plures-object-store = { path = "../object-store" }
+plures-object-http = { path = "../object-http" }
+plures-chunkstore = { path = "../chunkstore" }
+plures-manifest-db = { path = "../manifest-db" }
+tokio = { workspace = true }
+axum = { workspace = true }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -8,6 +8,7 @@ members = [
     "crates/object-store",
     "crates/stream",
     "crates/object-http",
+    "crates/object-cli",
 ]
 
 [workspace.package]
