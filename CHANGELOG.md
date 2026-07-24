@@ -1,3 +1,23 @@
+## [0.9.0] — 2026-07-24
+
+- Merge pull request #13 from plures/release-trigger-autobump (5400b71)
+- Potential fix for pull request finding (0a2b9e6)
+- ci(release): trigger release pipeline on merge to main (1401b96)
+- ci: migrate Tech Doc Writer to shared reusable (c02717e)
+- fix(ci): repair tech-doc-writer YAML indentation / remove empty workflow (5cb35ce)
+- ci: add security-aware Dependabot auto-merge workflow (org backfill) (bad693a)
+- ci: change release trigger from push-to-main to tag-only (f961e6f)
+- refactor: replace inline lifecycle with reusable workflow call (a670528)
+- feat: add object-cli binary crate — standalone S3-compatible server (27fdea5)
+- fix: suppress ci-feedback issue spam (24h dedup window) (ba89353)
+- feat: wire PluresDB manifest backend into ObjectService (#10) (59c5009)
+- docs: refresh ROADMAP.md with OASIS strategic alignment (2ac305d)
+- docs: update copilot-instructions with praxis, design-dojo, automation rules (eaddef0)
+- feat(release): add target_version input for milestone-driven releases (0ff8406)
+- feat(lifecycle): milestone-close triggers roadmap-aware release (769bcea)
+- docs: update copilot-instructions with Plures stack architecture (95937d6)
+- docs: update copilot-instructions with Plures stack architecture (9c703b4)
+
 ## [0.7.0] — 2026-04-18
 
 - feat(lifecycle v12): auto-release when milestone completes (9264629)
