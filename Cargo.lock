@@ -1072,6 +1072,7 @@ dependencies = [
  "plures-manifest",
  "plures-manifest-db",
  "plures-object-core",
+ "plures-stream",
  "sha2",
  "tokio",
  "tracing",

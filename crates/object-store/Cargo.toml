@@ -9,6 +9,7 @@ plures-object-core = { path = "../object-core" }
 plures-chunkstore = { path = "../chunkstore" }
 plures-manifest = { path = "../manifest" }
 plures-manifest-db = { path = "../manifest-db" }
+plures-stream = { path = "../stream" }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 sha2 = { workspace = true }
