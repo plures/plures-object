@@ -1,11 +1,13 @@
 //! HTTP handlers for the S3-compatible API.
 //!
 //! Route mapping:
-//! - `PUT    /:bucket/*key`              → [`put_object`]
-//! - `GET    /:bucket/*key`              → [`get_object`]  (streaming)
-//! - `DELETE /:bucket/*key`              → [`delete_object`]
-//! - `HEAD   /:bucket/*key`              → [`head_object`]
-//! - `GET    /:bucket`                   → [`list_objects`]
+//! - `PUT    /:bucket/*key`                       → [`put_or_upload_part`]
+//! - `GET    /:bucket/*key`                       → [`get_object`]  (streaming)
+//! - `DELETE /:bucket/*key`                       → [`delete_object`] or AbortMultipartUpload
+//! - `HEAD   /:bucket/*key`                       → [`head_object`]
+//! - `GET    /:bucket`                            → [`list_objects`]
+//! - `POST   /:bucket/*key?uploads`               → [`initiate_multipart_upload`]
+//! - `POST   /:bucket/*key?uploadId=…`            → [`complete_multipart_upload`]
 
 use std::sync::Arc;
 
@@ -17,7 +19,7 @@ use axum::{
 };
 use bytes::Bytes;
 use futures::TryStreamExt as _;
-use plures_object_core::ObjectKey;
+use plures_object_core::{CompletePart, ObjectKey};
 use plures_object_store::ObjectService;
 use serde::Deserialize;
 
@@ -29,6 +31,19 @@ use crate::{
 /// Shared application state passed to every handler.
 pub type AppState = Arc<ObjectService>;
 
+/// Query parameters for multipart upload operations.
+#[derive(Debug, Default, Deserialize)]
+pub struct MultipartQuery {
+    /// Present (even if empty) on `POST ?uploads` to initiate.
+    pub uploads: Option<String>,
+    /// Upload ID for UploadPart, CompleteMultipartUpload, AbortMultipartUpload.
+    #[serde(rename = "uploadId")]
+    pub upload_id: Option<String>,
+    /// Part number for UploadPart.
+    #[serde(rename = "partNumber")]
+    pub part_number: Option<u32>,
+}
+
 /// Parse a MIME type string into an `axum` [`header::HeaderValue`], falling
 /// back to `application/octet-stream` on failure.
 fn content_type_value(ct: Option<&str>) -> axum::http::HeaderValue {
@@ -38,11 +53,35 @@ fn content_type_value(ct: Option<&str>) -> axum::http::HeaderValue {
 
 // ── PUT /bucket/*key ─────────────────────────────────────────────────────────
 
-/// Store an object.
+/// Store an object, or upload a part if `?partNumber=…&uploadId=…` is present.
 ///
-/// The request body is the raw object data. `Content-Type` is forwarded as the
-/// object's MIME type. Returns `200 OK` with an `ETag` header.
-pub async fn put_object(
+/// When multipart query parameters are present, delegates to the multipart
+/// upload-part flow. Otherwise, stores a complete object.
+pub async fn put_or_upload_part(
+    State(svc): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<MultipartQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    // If multipart query params are present, delegate to upload_part.
+    if let (Some(upload_id), Some(part_number)) = (&params.upload_id, params.part_number) {
+        let resource = format!("/{bucket}/{key}");
+        match svc.upload_part(upload_id, part_number, body).await {
+            Ok(part) => (
+                StatusCode::OK,
+                [("etag", format!("\"{}\"", part.etag))],
+            )
+                .into_response(),
+            Err(e) => object_error_to_api(e, &resource).into_response(),
+        }
+    } else {
+        put_object(State(svc), Path((bucket, key)), headers, body).await
+    }
+}
+
+/// Store a complete object (non-multipart PUT).
+async fn put_object(
     State(svc): State<AppState>,
     Path((bucket, key)): Path<(String, String)>,
     headers: HeaderMap,
@@ -119,10 +158,22 @@ pub async fn get_object(
 // ── DELETE /bucket/*key ───────────────────────────────────────────────────────
 
 /// Delete an object. Returns `204 No Content` on success.
+///
+/// If `?uploadId=…` is present, aborts a multipart upload instead.
 pub async fn delete_object(
     State(svc): State<AppState>,
     Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<MultipartQuery>,
 ) -> Response {
+    // Abort multipart upload if uploadId is present.
+    if let Some(upload_id) = &params.upload_id {
+        let resource = format!("/{bucket}/{key}");
+        return match svc.abort_multipart_upload(upload_id).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(e) => object_error_to_api(e, &resource).into_response(),
+        };
+    }
+
     let object_key = ObjectKey(format!("{bucket}/{key}"));
     let resource = format!("/{bucket}/{key}");
 
@@ -222,4 +273,138 @@ pub async fn list_objects(
                 .into_response()
         }
     }
+}
+
+// ── Multipart Upload Handlers ────────────────────────────────────────────────
+
+/// POST /{bucket}/{*key}?uploads — initiate a multipart upload.
+pub async fn initiate_multipart_upload(
+    State(svc): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    _headers: HeaderMap,
+) -> Response {
+    let object_key = ObjectKey(format!("{bucket}/{key}"));
+    let resource = format!("/{bucket}/{key}");
+
+    match svc.initiate_multipart_upload(object_key).await {
+        Ok(upload_id) => {
+            let body = xml::initiate_multipart_upload_result(&bucket, &key, &upload_id);
+            (
+                StatusCode::OK,
+                [("content-type", "application/xml")],
+                body,
+            )
+                .into_response()
+        }
+        Err(e) => object_error_to_api(e, &resource).into_response(),
+    }
+}
+
+/// POST /{bucket}/{*key}?uploadId=… — complete a multipart upload.
+pub async fn complete_multipart_upload(
+    State(svc): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<MultipartQuery>,
+    body: Bytes,
+) -> Response {
+    let resource = format!("/{bucket}/{key}");
+    let upload_id = match &params.upload_id {
+        Some(id) => id,
+        None => {
+            return ApiError::bad_request("missing uploadId query parameter").into_response();
+        }
+    };
+
+    // Parse the XML body for <CompleteMultipartUpload> parts.
+    let parts = match parse_complete_multipart_xml(&body) {
+        Ok(p) => p,
+        Err(msg) => return ApiError::bad_request(msg).into_response(),
+    };
+
+    match svc.complete_multipart_upload(upload_id, parts).await {
+        Ok(meta) => {
+            let body = xml::complete_multipart_upload_result(&bucket, &key, &meta.etag);
+            (
+                StatusCode::OK,
+                [("content-type", "application/xml")],
+                body,
+            )
+                .into_response()
+        }
+        Err(e) => object_error_to_api(e, &resource).into_response(),
+    }
+}
+
+/// DELETE /{bucket}/{*key}?uploadId=… — abort a multipart upload.
+///
+/// This is handled by [`delete_object`] when `?uploadId` is present.
+pub async fn abort_multipart_upload(
+    State(svc): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<MultipartQuery>,
+) -> Response {
+    let resource = format!("/{bucket}/{key}");
+    let upload_id = match &params.upload_id {
+        Some(id) => id,
+        None => {
+            return ApiError::bad_request("missing uploadId query parameter").into_response();
+        }
+    };
+
+    match svc.abort_multipart_upload(upload_id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => object_error_to_api(e, &resource).into_response(),
+    }
+}
+
+/// Parse the S3 `CompleteMultipartUpload` XML body into a list of [`CompletePart`].
+///
+/// Accepts a simple XML format:
+/// ```xml
+/// <CompleteMultipartUpload>
+///   <Part><PartNumber>1</PartNumber><ETag>"…"</ETag></Part>
+///   <Part><PartNumber>2</PartNumber><ETag>"…"</ETag></Part>
+/// </CompleteMultipartUpload>
+/// ```
+fn parse_complete_multipart_xml(body: &[u8]) -> Result<Vec<CompletePart>, String> {
+    let text = std::str::from_utf8(body).map_err(|_| "invalid UTF-8 in request body")?;
+
+    let mut parts = Vec::new();
+    let mut remaining = text;
+
+    while let Some(part_start) = remaining.find("<Part>") {
+        let after_part = &remaining[part_start + 6..];
+        let part_end = after_part
+            .find("</Part>")
+            .ok_or("malformed XML: missing </Part>")?;
+        let part_content = &after_part[..part_end];
+
+        let part_number = extract_xml_tag(part_content, "PartNumber")
+            .ok_or("missing <PartNumber>")?
+            .parse::<u32>()
+            .map_err(|_| "invalid PartNumber")?;
+
+        let etag = extract_xml_tag(part_content, "ETag")
+            .ok_or("missing <ETag>")?
+            .trim_matches('"')
+            .to_string();
+
+        parts.push(CompletePart { part_number, etag });
+        remaining = &after_part[part_end + 7..];
+    }
+
+    if parts.is_empty() {
+        return Err("no <Part> elements found".into());
+    }
+
+    Ok(parts)
+}
+
+/// Extract text content from a simple XML tag (no attributes, no nesting).
+fn extract_xml_tag<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)? + start;
+    Some(&xml[start..end])
 }

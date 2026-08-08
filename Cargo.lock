@@ -1041,6 +1041,7 @@ dependencies = [
 name = "plures-object-http"
 version = "0.9.0"
 dependencies = [
+ "async-trait",
  "axum",
  "bytes",
  "chrono",
@@ -1052,7 +1053,9 @@ dependencies = [
  "plures-object-store",
  "reqwest",
  "serde",
+ "serde_json",
  "tempfile",
+ "thiserror",
  "tokio",
  "tower",
  "tower-http",
