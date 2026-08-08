@@ -338,7 +338,7 @@ pub async fn complete_multipart_upload(
 /// DELETE /{bucket}/{*key}?uploadId=… — abort a multipart upload.
 ///
 /// This is handled by [`delete_object`] when `?uploadId` is present.
-pub async fn abort_multipart_upload(
+async fn abort_multipart_upload(
     State(svc): State<AppState>,
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<MultipartQuery>,

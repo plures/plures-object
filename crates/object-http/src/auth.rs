@@ -137,7 +137,7 @@ impl AuthProvider for NoAuth {
 
 /// Simple bearer-token auth provider for development and testing.
 ///
-/// Validates an `Authorization: ****** header against a static set
+/// Validates an `Authorization` header with a ****** against a static set
 /// of known tokens. Each token maps to a [`Principal`].
 #[derive(Debug, Clone)]
 pub struct BearerTokenAuth {

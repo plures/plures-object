@@ -54,6 +54,7 @@ use std::sync::Arc;
 
 use axum::{
     middleware,
+    response::IntoResponse,
     routing::{delete, get, head, put},
     Router,
 };
@@ -113,5 +114,3 @@ async fn object_post(
             .into_response()
     }
 }
-
-use axum::response::IntoResponse;
