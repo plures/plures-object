@@ -331,3 +331,198 @@ async fn list_empty_bucket_returns_empty_xml() {
     assert!(body.contains("<ListBucketResult"));
     assert!(!body.contains("<Contents>"));
 }
+
+// ── MULTIPART UPLOAD ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn multipart_initiate_returns_upload_id() {
+    let (base, client) = start_server().await;
+
+    let resp = client
+        .post(format!("{base}/bucket/multi/key.bin?uploads"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("<InitiateMultipartUploadResult"));
+    assert!(body.contains("<Bucket>bucket</Bucket>"));
+    assert!(body.contains("<Key>multi/key.bin</Key>"));
+    assert!(body.contains("<UploadId>"));
+}
+
+/// Helper: extract the UploadId from an InitiateMultipartUploadResult XML.
+fn extract_upload_id(xml: &str) -> String {
+    let start = xml.find("<UploadId>").unwrap() + "<UploadId>".len();
+    let end = xml[start..].find("</UploadId>").unwrap() + start;
+    xml[start..end].to_string()
+}
+
+/// Helper: extract the ETag header value (without quotes).
+fn extract_etag(resp: &reqwest::Response) -> String {
+    resp.headers()
+        .get("etag")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
+}
+
+#[tokio::test]
+async fn multipart_upload_part_returns_etag() {
+    let (base, client) = start_server().await;
+
+    // Initiate
+    let resp = client
+        .post(format!("{base}/bucket/mp/obj?uploads"))
+        .send()
+        .await
+        .unwrap();
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Upload part 1
+    let resp = client
+        .put(format!(
+            "{base}/bucket/mp/obj?partNumber=1&uploadId={upload_id}"
+        ))
+        .body("part one")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.headers().contains_key("etag"));
+}
+
+#[tokio::test]
+async fn multipart_complete_assembles_object() {
+    let (base, client) = start_server().await;
+
+    // Initiate
+    let resp = client
+        .post(format!("{base}/bucket/mp/full?uploads"))
+        .send()
+        .await
+        .unwrap();
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Upload part 1
+    let resp = client
+        .put(format!(
+            "{base}/bucket/mp/full?partNumber=1&uploadId={upload_id}"
+        ))
+        .body("hello ")
+        .send()
+        .await
+        .unwrap();
+    let etag1 = extract_etag(&resp);
+
+    // Upload part 2
+    let resp = client
+        .put(format!(
+            "{base}/bucket/mp/full?partNumber=2&uploadId={upload_id}"
+        ))
+        .body("world")
+        .send()
+        .await
+        .unwrap();
+    let etag2 = extract_etag(&resp);
+
+    // Complete
+    let complete_body = format!(
+        "<CompleteMultipartUpload>\
+           <Part><PartNumber>1</PartNumber><ETag>\"{etag1}\"</ETag></Part>\
+           <Part><PartNumber>2</PartNumber><ETag>\"{etag2}\"</ETag></Part>\
+         </CompleteMultipartUpload>"
+    );
+    let resp = client
+        .post(format!(
+            "{base}/bucket/mp/full?uploadId={upload_id}"
+        ))
+        .body(complete_body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("<CompleteMultipartUploadResult"));
+    assert!(body.contains("<ETag>"));
+
+    // Verify the assembled object is retrievable.
+    let resp = client
+        .get(format!("{base}/bucket/mp/full"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.bytes().await.unwrap();
+    assert_eq!(&*body, b"hello world");
+}
+
+#[tokio::test]
+async fn multipart_abort_cleans_up() {
+    let (base, client) = start_server().await;
+
+    // Initiate
+    let resp = client
+        .post(format!("{base}/bucket/mp/abort?uploads"))
+        .send()
+        .await
+        .unwrap();
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Upload a part
+    client
+        .put(format!(
+            "{base}/bucket/mp/abort?partNumber=1&uploadId={upload_id}"
+        ))
+        .body("partial")
+        .send()
+        .await
+        .unwrap();
+
+    // Abort
+    let resp = client
+        .delete(format!(
+            "{base}/bucket/mp/abort?uploadId={upload_id}"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // Object should not exist
+    let resp = client
+        .get(format!("{base}/bucket/mp/abort"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn multipart_abort_unknown_returns_404() {
+    let (base, client) = start_server().await;
+
+    let resp = client
+        .delete(format!("{base}/bucket/mp/x?uploadId=nonexistent"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_object_still_works_without_multipart_params() {
+    let (base, client) = start_server().await;
+    let url = format!("{base}/bucket/normal-put");
+
+    let resp = client.put(&url).body("normal data").send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = client.get(&url).send().await.unwrap();
+    assert_eq!(resp.text().await.unwrap(), "normal data");
+}

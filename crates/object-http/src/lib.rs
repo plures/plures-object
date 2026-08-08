@@ -2,13 +2,17 @@
 //!
 //! Exposes [`ObjectService`] via an axum router with the following endpoints:
 //!
-//! | Method   | Path                             | Operation        |
-//! |----------|----------------------------------|------------------|
-//! | `PUT`    | `/:bucket/*key`                  | PutObject        |
-//! | `GET`    | `/:bucket/*key`                  | GetObject        |
-//! | `DELETE` | `/:bucket/*key`                  | DeleteObject     |
-//! | `HEAD`   | `/:bucket/*key`                  | HeadObject       |
-//! | `GET`    | `/:bucket`                       | ListObjects      |
+//! | Method   | Path                             | Operation                    |
+//! |----------|----------------------------------|------------------------------|
+//! | `PUT`    | `/:bucket/*key`                  | PutObject                    |
+//! | `PUT`    | `/:bucket/*key?partNumber=&uploadId=` | UploadPart              |
+//! | `GET`    | `/:bucket/*key`                  | GetObject                    |
+//! | `DELETE` | `/:bucket/*key`                  | DeleteObject                 |
+//! | `DELETE` | `/:bucket/*key?uploadId=`        | AbortMultipartUpload         |
+//! | `HEAD`   | `/:bucket/*key`                  | HeadObject                   |
+//! | `POST`   | `/:bucket/*key?uploads`          | InitiateMultipartUpload      |
+//! | `POST`   | `/:bucket/*key?uploadId=`        | CompleteMultipartUpload      |
+//! | `GET`    | `/:bucket`                       | ListObjects                  |
 //!
 //! Response formats match the S3 XML schema so the API passes standard S3 SDK
 //! client validation.
@@ -42,12 +46,12 @@ pub mod xml;
 use std::sync::Arc;
 
 use axum::{
-    routing::{delete, get, head, put},
+    routing::{delete, get, head, post, put},
     Router,
 };
 use plures_object_store::ObjectService;
 
-use handlers::{delete_object, get_object, head_object, list_objects, put_object, AppState};
+use handlers::{delete_object_or_upload, get_object, head_object, list_objects, post_object, put_object_or_part, AppState};
 
 /// Build the S3-compatible axum [`Router`] backed by the given [`ObjectService`].
 ///
@@ -67,10 +71,11 @@ pub fn make_router(service: Arc<ObjectService>) -> Router {
 
     Router::new()
         // Object-level routes — wildcard key captures everything after bucket/
-        .route("/{bucket}/{*key}", put(put_object))
+        .route("/{bucket}/{*key}", put(put_object_or_part))
         .route("/{bucket}/{*key}", get(get_object))
-        .route("/{bucket}/{*key}", delete(delete_object))
+        .route("/{bucket}/{*key}", delete(delete_object_or_upload))
         .route("/{bucket}/{*key}", head(head_object))
+        .route("/{bucket}/{*key}", post(post_object))
         // Bucket-level list route
         .route("/{bucket}", get(list_objects))
         .with_state(state)

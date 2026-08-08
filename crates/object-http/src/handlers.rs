@@ -26,6 +26,22 @@ use crate::{
     xml,
 };
 
+// ── Multipart query params ───────────────────────────────────────────────────
+
+/// Query parameters for multipart upload operations.
+#[derive(Debug, Deserialize)]
+pub struct MultipartQuery {
+    /// Present (any value, including empty) on `POST /{bucket}/{*key}?uploads`
+    /// to initiate a multipart upload.
+    pub uploads: Option<String>,
+    /// Upload ID for UploadPart, CompleteMultipartUpload, and AbortMultipartUpload.
+    #[serde(rename = "uploadId")]
+    pub upload_id: Option<String>,
+    /// Part number for UploadPart.
+    #[serde(rename = "partNumber")]
+    pub part_number: Option<u32>,
+}
+
 /// Shared application state passed to every handler.
 pub type AppState = Arc<ObjectService>;
 
@@ -220,6 +236,145 @@ pub async fn list_objects(
                 xml,
             )
                 .into_response()
+        }
+    }
+}
+
+// ── POST /bucket/*key — multipart initiate or complete ───────────────────────
+
+/// Dispatch `POST /{bucket}/{*key}` to either InitiateMultipartUpload or
+/// CompleteMultipartUpload based on query parameters.
+///
+/// - `?uploads` → InitiateMultipartUpload
+/// - `?uploadId=…` → CompleteMultipartUpload (body is XML)
+pub async fn post_object(
+    State(svc): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<MultipartQuery>,
+    body: Bytes,
+) -> Response {
+    let resource = format!("/{bucket}/{key}");
+
+    if params.uploads.is_some() {
+        // InitiateMultipartUpload
+        let object_key = ObjectKey(format!("{bucket}/{key}"));
+        match svc.initiate_multipart_upload(object_key).await {
+            Ok(upload_id) => {
+                let xml_body =
+                    xml::initiate_multipart_upload_result(&bucket, &key, &upload_id);
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/xml")],
+                    xml_body,
+                )
+                    .into_response()
+            }
+            Err(e) => object_error_to_api(e, &resource).into_response(),
+        }
+    } else if let Some(upload_id) = params.upload_id {
+        // CompleteMultipartUpload
+        let body_str = match std::str::from_utf8(&body) {
+            Ok(s) => s,
+            Err(_) => return ApiError::bad_request("invalid UTF-8 in request body").into_response(),
+        };
+        let parsed = match xml::parse_complete_multipart_upload(body_str) {
+            Ok(parts) => parts,
+            Err(msg) => return ApiError::bad_request(msg).into_response(),
+        };
+        let complete_parts: Vec<plures_object_core::CompletePart> = parsed
+            .into_iter()
+            .map(|(part_number, etag)| plures_object_core::CompletePart { part_number, etag })
+            .collect();
+
+        match svc.complete_multipart_upload(&upload_id, complete_parts).await {
+            Ok(meta) => {
+                let xml_body =
+                    xml::complete_multipart_upload_result(&bucket, &key, &meta.etag);
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/xml")],
+                    xml_body,
+                )
+                    .into_response()
+            }
+            Err(e) => object_error_to_api(e, &resource).into_response(),
+        }
+    } else {
+        ApiError::bad_request("POST requires ?uploads or ?uploadId query parameter").into_response()
+    }
+}
+
+// ── PUT /bucket/*key?partNumber=…&uploadId=… — UploadPart ────────────────────
+
+/// Upload a single part of a multipart upload.
+///
+/// When both `partNumber` and `uploadId` query parameters are present, delegates
+/// to [`ObjectService::upload_part`] instead of the normal PutObject path.
+/// Returns `200 OK` with an `ETag` header for the uploaded part.
+pub async fn put_object_or_part(
+    State(svc): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<MultipartQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let resource = format!("/{bucket}/{key}");
+
+    // If both partNumber and uploadId are present, this is an UploadPart request.
+    if let (Some(part_number), Some(upload_id)) = (params.part_number, &params.upload_id) {
+        match svc.upload_part(upload_id, part_number, body).await {
+            Ok(part) => (
+                StatusCode::OK,
+                [("etag", format!("\"{}\"", part.etag))],
+            )
+                .into_response(),
+            Err(e) => object_error_to_api(e, &resource).into_response(),
+        }
+    } else {
+        // Normal PutObject
+        let object_key = ObjectKey(format!("{bucket}/{key}"));
+        let content_type = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
+
+        match svc.put_object(object_key, body, content_type).await {
+            Ok(meta) => (
+                StatusCode::OK,
+                [
+                    ("etag", format!("\"{}\"", meta.etag)),
+                    ("content-type", "application/xml".into()),
+                ],
+            )
+                .into_response(),
+            Err(e) => object_error_to_api(e, &resource).into_response(),
+        }
+    }
+}
+
+// ── DELETE /bucket/*key?uploadId=… — AbortMultipartUpload ────────────────────
+
+/// Delete an object or abort a multipart upload.
+///
+/// When `?uploadId=…` is present, aborts the multipart upload session.
+/// Otherwise, deletes the object.
+pub async fn delete_object_or_upload(
+    State(svc): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<MultipartQuery>,
+) -> Response {
+    let object_key = ObjectKey(format!("{bucket}/{key}"));
+    let resource = format!("/{bucket}/{key}");
+
+    if let Some(upload_id) = params.upload_id {
+        match svc.abort_multipart_upload(&upload_id).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(e) => object_error_to_api(e, &resource).into_response(),
+        }
+    } else {
+        match svc.delete_object(&object_key).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(e) => object_error_to_api(e, &resource).into_response(),
         }
     }
 }
