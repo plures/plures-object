@@ -160,6 +160,7 @@ impl ObjectService {
     pub async fn delete_object(&self, key: &ObjectKey) -> Result<(), ObjectError> {
         // Get manifest to find chunks (for future GC)
         let _manifest = self.manifests.get(key).await?;
+        let now = Utc::now();
         // TODO: Mark chunks for GC if no other manifest references them
         self.manifests.delete(key).await?;
 
@@ -167,7 +168,7 @@ impl ObjectService {
             engine
                 .publish(StreamEvent::ObjectDeleted {
                     key: key.clone(),
-                    timestamp: Utc::now(),
+                    timestamp: now,
                 })
                 .await;
         }
