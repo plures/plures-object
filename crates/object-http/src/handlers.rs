@@ -275,7 +275,10 @@ pub async fn post_object(
         // CompleteMultipartUpload
         let body_str = match std::str::from_utf8(&body) {
             Ok(s) => s,
-            Err(_) => return ApiError::bad_request("invalid UTF-8 in request body").into_response(),
+            Err(e) => {
+                tracing::warn!(error = %e, "invalid UTF-8 in CompleteMultipartUpload body");
+                return ApiError::bad_request("invalid UTF-8 in request body").into_response();
+            }
         };
         let parsed = match xml::parse_complete_multipart_upload(body_str) {
             Ok(parts) => parts,
@@ -330,6 +333,9 @@ pub async fn put_object_or_part(
                 .into_response(),
             Err(e) => object_error_to_api(e, &resource).into_response(),
         }
+    } else if params.part_number.is_some() || params.upload_id.is_some() {
+        // One of partNumber/uploadId is present but not both — invalid.
+        ApiError::bad_request("UploadPart requires both partNumber and uploadId").into_response()
     } else {
         // Normal PutObject
         let object_key = ObjectKey(format!("{bucket}/{key}"));
