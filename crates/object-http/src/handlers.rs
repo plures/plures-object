@@ -255,6 +255,13 @@ pub async fn post_object(
 ) -> Response {
     let resource = format!("/{bucket}/{key}");
 
+    if params.part_number.is_some() {
+        return ApiError::bad_request("POST does not support partNumber; use PUT for UploadPart").into_response();
+    }
+    if params.uploads.is_some() && params.upload_id.is_some() {
+        return ApiError::bad_request("POST cannot specify both uploads and uploadId").into_response();
+    }
+
     if params.uploads.is_some() {
         // InitiateMultipartUpload
         let object_key = ObjectKey(format!("{bucket}/{key}"));
