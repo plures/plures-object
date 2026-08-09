@@ -1,3 +1,13 @@
+## [0.10.0] — 2026-08-09
+
+- Merge pull request #16 from plures/copilot/emit-streaming-events-for-operations (182ad7c)
+- Potential fix for pull request finding (93a3a4a)
+- fix: capture delete timestamp before the operation (8707f04)
+- feat: emit streaming events for all object operations (36fa5cc)
+- Initial plan (4063578)
+- Merge pull request #14 from plures/chore/dependabot-auto-merge-workflow-call (7a1b1d6)
+- chore: delegate dependabot-auto-merge.yml to plures/.github reusable template (50a8a0f)
+
 ## [0.9.0] — 2026-07-24
 
 - Merge pull request #13 from plures/release-trigger-autobump (5400b71)
