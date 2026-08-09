@@ -2,26 +2,20 @@
 //!
 //! Exposes [`ObjectService`] via an axum router with the following endpoints:
 //!
-//! | Method   | Path                             | Operation                 |
-//! |----------|----------------------------------|---------------------------|
-//! | `PUT`    | `/:bucket/*key`                  | PutObject                 |
-//! | `GET`    | `/:bucket/*key`                  | GetObject                 |
-//! | `DELETE` | `/:bucket/*key`                  | DeleteObject              |
-//! | `HEAD`   | `/:bucket/*key`                  | HeadObject                |
-//! | `GET`    | `/:bucket`                       | ListObjects               |
-//! | `POST`   | `/:bucket/*key?uploads`          | InitiateMultipartUpload   |
-//! | `PUT`    | `/:bucket/*key?partNumber&uploadId` | UploadPart             |
-//! | `POST`   | `/:bucket/*key?uploadId`         | CompleteMultipartUpload   |
-//! | `DELETE` | `/:bucket/*key?uploadId`         | AbortMultipartUpload      |
+//! | Method   | Path                             | Operation                    |
+//! |----------|----------------------------------|------------------------------|
+//! | `PUT`    | `/:bucket/*key`                  | PutObject                    |
+//! | `PUT`    | `/:bucket/*key?partNumber=&uploadId=` | UploadPart              |
+//! | `GET`    | `/:bucket/*key`                  | GetObject                    |
+//! | `DELETE` | `/:bucket/*key`                  | DeleteObject                 |
+//! | `DELETE` | `/:bucket/*key?uploadId=`        | AbortMultipartUpload         |
+//! | `HEAD`   | `/:bucket/*key`                  | HeadObject                   |
+//! | `POST`   | `/:bucket/*key?uploads`          | InitiateMultipartUpload      |
+//! | `POST`   | `/:bucket/*key?uploadId=`        | CompleteMultipartUpload      |
+//! | `GET`    | `/:bucket`                       | ListObjects                  |
 //!
 //! Response formats match the S3 XML schema so the API passes standard S3 SDK
 //! client validation.
-//!
-//! # Authentication
-//!
-//! The gateway supports pluggable authentication via the [`auth::AuthProvider`]
-//! trait. Use [`make_router_with_auth`] to enable auth, or [`make_router`] for
-//! an unauthenticated gateway (development/testing).
 //!
 //! # Example
 //!
@@ -54,30 +48,33 @@ use std::sync::Arc;
 
 use axum::{
     middleware,
-    response::IntoResponse,
-    routing::{delete, get, head, put},
+    routing::{delete, get, head, post, put},
     Router,
 };
 use plures_object_store::ObjectService;
 
 use auth::{auth_middleware, AuthProvider, NoAuth};
-use handlers::{
-    complete_multipart_upload, delete_object, get_object, head_object,
-    initiate_multipart_upload, list_objects, put_or_upload_part, AppState,
-};
+
+use handlers::{delete_object_or_upload, get_object, head_object, list_objects, post_object, put_object_or_part, AppState};
 
 /// Build the S3-compatible axum [`Router`] backed by the given [`ObjectService`].
 ///
-/// This variant uses [`NoAuth`] — all requests are allowed. For production use,
-/// prefer [`make_router_with_auth`].
+/// Mount this router directly or nest it under a prefix:
+///
+/// ```rust,no_run
+/// # use std::sync::Arc;
+/// # use plures_object_http::make_router;
+/// # use plures_object_store::ObjectService;
+/// # use plures_chunkstore::MemChunkStore;
+/// # use plures_manifest::MemManifestStore;
+/// # let svc = Arc::new(ObjectService::new(Arc::new(MemChunkStore::new()), Arc::new(MemManifestStore::new())));
+/// let app = axum::Router::new().nest("/s3", make_router(svc));
+/// ```
 pub fn make_router(service: Arc<ObjectService>) -> Router {
     make_router_with_auth(service, Arc::new(NoAuth))
 }
 
 /// Build the S3-compatible axum [`Router`] with a custom [`AuthProvider`].
-///
-/// The auth provider is called for every incoming request. On success the
-/// resulting [`auth::Principal`] is injected into request extensions.
 pub fn make_router_with_auth(
     service: Arc<ObjectService>,
     auth: Arc<dyn AuthProvider>,
@@ -86,31 +83,16 @@ pub fn make_router_with_auth(
 
     Router::new()
         // Object-level routes — wildcard key captures everything after bucket/
-        .route("/{bucket}/{*key}", put(put_or_upload_part))
+        .route("/{bucket}/{*key}", put(put_object_or_part))
         .route("/{bucket}/{*key}", get(get_object))
-        .route("/{bucket}/{*key}", delete(delete_object).post(object_post))
+        .route("/{bucket}/{*key}", delete(delete_object_or_upload))
         .route("/{bucket}/{*key}", head(head_object))
+        .route("/{bucket}/{*key}", post(post_object))
         // Bucket-level list route
         .route("/{bucket}", get(list_objects))
-        .layer(middleware::from_fn_with_state(auth.clone(), auth_middleware))
+        .layer(middleware::from_fn(move |req, next| {
+            let auth = auth.clone();
+            async move { auth_middleware(auth, req, next).await }
+        }))
         .with_state(state)
-}
-
-/// POST /{bucket}/{*key} dispatcher — routes to either InitiateMultipartUpload
-/// or CompleteMultipartUpload depending on query parameters.
-async fn object_post(
-    state: axum::extract::State<AppState>,
-    path: axum::extract::Path<(String, String)>,
-    query: axum::extract::Query<handlers::MultipartQuery>,
-    headers: axum::http::HeaderMap,
-    body: bytes::Bytes,
-) -> axum::response::Response {
-    if query.uploads.is_some() {
-        initiate_multipart_upload(state, path, headers).await
-    } else if query.upload_id.is_some() {
-        complete_multipart_upload(state, path, query, body).await
-    } else {
-        error::ApiError::bad_request("missing required query parameter: uploads or uploadId")
-            .into_response()
-    }
 }

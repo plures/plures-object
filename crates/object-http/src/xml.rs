@@ -88,6 +88,60 @@ fn fmt_datetime(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
+/// Parse a `CompleteMultipartUpload` XML request body into a list of
+/// `(part_number, etag)` pairs.
+///
+/// Expected format:
+/// ```xml
+/// <CompleteMultipartUpload>
+///   <Part>
+///     <PartNumber>1</PartNumber>
+///     <ETag>"abc123"</ETag>
+///   </Part>
+///   ...
+/// </CompleteMultipartUpload>
+/// ```
+pub fn parse_complete_multipart_upload(body: &str) -> Result<Vec<(u32, String)>, String> {
+    let mut parts = Vec::new();
+    let mut rest = body;
+
+    while let Some(start) = rest.find("<Part>") {
+        let after_start = &rest[start + 6..];
+        let end = after_start
+            .find("</Part>")
+            .ok_or("missing </Part>")?;
+        let part_xml = &after_start[..end];
+        rest = &after_start[end + 7..];
+
+        let part_number = extract_tag_content(part_xml, "PartNumber")
+            .ok_or("missing <PartNumber>")?
+            .parse::<u32>()
+            .map_err(|e| format!("invalid PartNumber: {e}"))?;
+
+        let etag_raw = extract_tag_content(part_xml, "ETag")
+            .ok_or("missing <ETag>")?;
+        // Strip surrounding quotes if present (S3 convention).
+        let etag = etag_raw.trim_matches('"').to_string();
+
+        parts.push((part_number, etag));
+    }
+
+    if parts.is_empty() {
+        return Err("no <Part> elements found".into());
+    }
+
+    Ok(parts)
+}
+
+/// Extract the text content of a simple XML tag like `<Tag>value</Tag>`.
+fn extract_tag_content<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)? + start;
+    Some(xml[start..end].trim())
+}
+
 /// Escape XML special characters.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")

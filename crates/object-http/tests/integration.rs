@@ -7,8 +7,7 @@ use std::sync::Arc;
 
 use plures_chunkstore::MemChunkStore;
 use plures_manifest::MemManifestStore;
-use plures_object_http::auth::{AuthProvider, BearerTokenAuth, Principal};
-use plures_object_http::{make_router, make_router_with_auth};
+use plures_object_http::make_router;
 use plures_object_store::ObjectService;
 use reqwest::{Client, StatusCode};
 
@@ -37,47 +36,6 @@ async fn start_server() -> (String, Client) {
         .expect("reqwest client");
 
     (base_url, client)
-}
-
-/// Start a server with bearer token auth and return base URL + client + valid token.
-async fn start_server_with_auth() -> (String, Client, String) {
-    let service = Arc::new(
-        ObjectService::new(Arc::new(MemChunkStore::new()), Arc::new(MemManifestStore::new()))
-            .with_chunk_size(4),
-    );
-
-    let token = "test-value-abc123".to_string();
-    let mut tokens = std::collections::HashMap::new();
-    tokens.insert(
-        token.clone(),
-        Principal {
-            id: "test-user".into(),
-            display_name: Some("Test User".into()),
-            permissions: vec!["s3:*".into()],
-        },
-    );
-    let auth: Arc<dyn AuthProvider> = Arc::new(BearerTokenAuth::new(tokens));
-
-    let app = make_router_with_auth(service, auth);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind");
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{addr}");
-
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    let client = Client::builder().build().expect("reqwest client");
-    (base_url, client, token)
-}
-
-/// Build an Authorization header value.
-fn bearer_header(token: &str) -> String {
-    let mut s = String::from("Bearer ");
-    s.push_str(token);
-    s
 }
 
 // ── PUT ───────────────────────────────────────────────────────────────────────
@@ -374,182 +332,220 @@ async fn list_empty_bucket_returns_empty_xml() {
     assert!(!body.contains("<Contents>"));
 }
 
-// ── Multipart Upload ─────────────────────────────────────────────────────────
+// ── MULTIPART UPLOAD ─────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn multipart_upload_full_flow() {
+async fn multipart_initiate_returns_upload_id() {
     let (base, client) = start_server().await;
-    let bucket = "mp-bucket";
-    let key = "multipart-file.bin";
 
-    // 1. Initiate multipart upload
     let resp = client
-        .post(format!("{base}/{bucket}/{key}?uploads"))
+        .post(format!("{base}/bucket/multi/key.bin?uploads"))
         .send()
         .await
         .unwrap();
+
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.text().await.unwrap();
     assert!(body.contains("<InitiateMultipartUploadResult"));
+    assert!(body.contains("<Bucket>bucket</Bucket>"));
+    assert!(body.contains("<Key>multi/key.bin</Key>"));
     assert!(body.contains("<UploadId>"));
+}
 
-    // Extract upload ID from XML
-    let upload_id = body
-        .split("<UploadId>")
-        .nth(1)
+/// Helper: extract the UploadId from an InitiateMultipartUploadResult XML.
+fn extract_upload_id(xml: &str) -> String {
+    let start = xml.find("<UploadId>").unwrap() + "<UploadId>".len();
+    let end = xml[start..].find("</UploadId>").unwrap() + start;
+    xml[start..end].to_string()
+}
+
+/// Helper: extract the ETag header value (without quotes).
+fn extract_etag(resp: &reqwest::Response) -> String {
+    resp.headers()
+        .get("etag")
         .unwrap()
-        .split("</UploadId>")
-        .next()
-        .unwrap();
+        .to_str()
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
+}
 
-    // 2. Upload part 1
+#[tokio::test]
+async fn multipart_upload_part_returns_etag() {
+    let (base, client) = start_server().await;
+
+    // Initiate
+    let resp = client
+        .post(format!("{base}/bucket/mp/obj?uploads"))
+        .send()
+        .await
+        .unwrap();
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Upload part 1
     let resp = client
         .put(format!(
-            "{base}/{bucket}/{key}?uploadId={upload_id}&partNumber=1"
+            "{base}/bucket/mp/obj?partNumber=1&uploadId={upload_id}"
+        ))
+        .body("part one")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.headers().contains_key("etag"));
+}
+
+#[tokio::test]
+async fn multipart_put_missing_part_number_returns_400() {
+    let (base, client) = start_server().await;
+
+    // Initiate
+    let resp = client
+        .post(format!("{base}/bucket/mp/missing-part?uploads"))
+        .send()
+        .await
+        .unwrap();
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Missing partNumber should be rejected.
+    let resp = client
+        .put(format!("{base}/bucket/mp/missing-part?uploadId={upload_id}"))
+        .body("partial")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn multipart_complete_assembles_object() {
+    let (base, client) = start_server().await;
+
+    // Initiate
+    let resp = client
+        .post(format!("{base}/bucket/mp/full?uploads"))
+        .send()
+        .await
+        .unwrap();
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Upload part 1
+    let resp = client
+        .put(format!(
+            "{base}/bucket/mp/full?partNumber=1&uploadId={upload_id}"
         ))
         .body("hello ")
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let etag1 = resp
-        .headers()
-        .get("etag")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .trim_matches('"')
-        .to_string();
+    let etag1 = extract_etag(&resp);
 
-    // 3. Upload part 2
+    // Upload part 2
     let resp = client
         .put(format!(
-            "{base}/{bucket}/{key}?uploadId={upload_id}&partNumber=2"
+            "{base}/bucket/mp/full?partNumber=2&uploadId={upload_id}"
         ))
-        .body("world!")
+        .body("world")
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let etag2 = resp
-        .headers()
-        .get("etag")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .trim_matches('"')
-        .to_string();
+    let etag2 = extract_etag(&resp);
 
-    // 4. Complete multipart upload
-    let complete_xml = format!(
+    // Complete
+    let complete_body = format!(
         "<CompleteMultipartUpload>\
            <Part><PartNumber>1</PartNumber><ETag>\"{etag1}\"</ETag></Part>\
            <Part><PartNumber>2</PartNumber><ETag>\"{etag2}\"</ETag></Part>\
          </CompleteMultipartUpload>"
     );
     let resp = client
-        .post(format!("{base}/{bucket}/{key}?uploadId={upload_id}"))
-        .body(complete_xml)
+        .post(format!(
+            "{base}/bucket/mp/full?uploadId={upload_id}"
+        ))
+        .body(complete_body)
         .send()
         .await
         .unwrap();
+
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.text().await.unwrap();
     assert!(body.contains("<CompleteMultipartUploadResult"));
+    assert!(body.contains("<ETag>"));
 
-    // 5. Verify the object is readable
+    // Verify the assembled object is retrievable.
     let resp = client
-        .get(format!("{base}/{bucket}/{key}"))
+        .get(format!("{base}/bucket/mp/full"))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = resp.text().await.unwrap();
-    assert_eq!(body, "hello world!");
+    let body = resp.bytes().await.unwrap();
+    assert_eq!(&*body, b"hello world");
 }
 
 #[tokio::test]
-async fn abort_multipart_upload() {
+async fn multipart_abort_cleans_up() {
     let (base, client) = start_server().await;
-    let bucket = "abort-bucket";
-    let key = "abort-key";
 
     // Initiate
     let resp = client
-        .post(format!("{base}/{bucket}/{key}?uploads"))
+        .post(format!("{base}/bucket/mp/abort?uploads"))
         .send()
         .await
         .unwrap();
-    let body = resp.text().await.unwrap();
-    let upload_id = body
-        .split("<UploadId>")
-        .nth(1)
-        .unwrap()
-        .split("</UploadId>")
-        .next()
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Upload a part
+    client
+        .put(format!(
+            "{base}/bucket/mp/abort?partNumber=1&uploadId={upload_id}"
+        ))
+        .body("partial")
+        .send()
+        .await
         .unwrap();
 
     // Abort
     let resp = client
-        .delete(format!("{base}/{bucket}/{key}?uploadId={upload_id}"))
+        .delete(format!(
+            "{base}/bucket/mp/abort?uploadId={upload_id}"
+        ))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-}
 
-// ── Auth ─────────────────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn auth_rejects_unauthenticated_request() {
-    let (base, client, _token) = start_server_with_auth().await;
-
-    // No auth header → 403
+    // Object should not exist
     let resp = client
-        .get(format!("{base}/bucket/key"))
+        .get(format!("{base}/bucket/mp/abort"))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let body = resp.text().await.unwrap();
-    assert!(body.contains("<Code>AccessDenied</Code>"));
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn auth_accepts_valid_token() {
-    let (base, client, token) = start_server_with_auth().await;
+async fn multipart_abort_unknown_returns_404() {
+    let (base, client) = start_server().await;
 
-    // PUT with valid token
     let resp = client
-        .put(format!("{base}/bucket/authed-key"))
-        .header("Authorization", bearer_header(&token))
-        .body("secure data")
+        .delete(format!("{base}/bucket/mp/x?uploadId=nonexistent"))
         .send()
         .await
         .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_object_still_works_without_multipart_params() {
+    let (base, client) = start_server().await;
+    let url = format!("{base}/bucket/normal-put");
+
+    let resp = client.put(&url).body("normal data").send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // GET with valid token
-    let resp = client
-        .get(format!("{base}/bucket/authed-key"))
-        .header("Authorization", bearer_header(&token))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = resp.text().await.unwrap();
-    assert_eq!(body, "secure data");
-}
-
-#[tokio::test]
-async fn auth_rejects_invalid_token() {
-    let (base, client, _token) = start_server_with_auth().await;
-
-    let resp = client
-        .get(format!("{base}/bucket/key"))
-        .header("Authorization", bearer_header("wrong-value"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let resp = client.get(&url).send().await.unwrap();
+    assert_eq!(resp.text().await.unwrap(), "normal data");
 }

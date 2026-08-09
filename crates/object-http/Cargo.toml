@@ -11,7 +11,9 @@ plures-chunkstore = { path = "../chunkstore" }
 plures-manifest = { path = "../manifest" }
 plures-manifest-db = { path = "../manifest-db" }
 axum = { workspace = true }
+async-trait = { workspace = true }
 tower = { workspace = true }
+thiserror = { workspace = true }
 tower-http = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
@@ -19,8 +21,6 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
-async-trait = { workspace = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }

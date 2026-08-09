@@ -14,8 +14,9 @@ use uuid::Uuid;
 
 use plures_object_core::{
     Chunk, ChunkId, ChunkStorage, CompletePart, Manifest, ManifestPart, ManifestStorage,
-    MultipartUpload, ObjectError, ObjectKey, ObjectMeta, UploadedPart,
+    MultipartUpload, ObjectError, ObjectKey, ObjectMeta, StreamEvent, UploadedPart,
 };
+use plures_stream::StreamEngine;
 
 /// Default chunk size: 8 MiB.
 const DEFAULT_CHUNK_SIZE: usize = 8 * 1024 * 1024;
@@ -27,6 +28,8 @@ pub struct ObjectService {
     chunk_size: usize,
     /// In-progress multipart upload sessions, keyed by upload ID.
     staging: Arc<RwLock<HashMap<String, MultipartUpload>>>,
+    /// Optional stream engine for emitting events on object operations.
+    stream: Option<Arc<StreamEngine>>,
 }
 
 impl ObjectService {
@@ -37,12 +40,19 @@ impl ObjectService {
             manifests,
             chunk_size: DEFAULT_CHUNK_SIZE,
             staging: Arc::new(RwLock::new(HashMap::new())),
+            stream: None,
         }
     }
 
     /// Override the chunk size for splitting objects.
     pub fn with_chunk_size(mut self, size: usize) -> Self {
         self.chunk_size = size;
+        self
+    }
+
+    /// Attach a stream engine for emitting events on object operations.
+    pub fn with_stream_engine(mut self, engine: Arc<StreamEngine>) -> Self {
+        self.stream = Some(engine);
         self
     }
 
@@ -60,6 +70,7 @@ impl ObjectService {
             manifests: Arc::new(store),
             chunk_size: DEFAULT_CHUNK_SIZE,
             staging: Arc::new(RwLock::new(HashMap::new())),
+            stream: None,
         })
     }
 
@@ -95,7 +106,7 @@ impl ObjectService {
         self.manifests.put(manifest).await?;
 
         let now = Utc::now();
-        Ok(ObjectMeta {
+        let meta = ObjectMeta {
             key,
             size: total_size,
             content_type,
@@ -104,7 +115,21 @@ impl ObjectService {
             etag,
             created_at: now,
             updated_at: now,
-        })
+        };
+
+        if let Some(engine) = self.stream.clone() {
+            let event = StreamEvent::ObjectCreated {
+                key: meta.key.clone(),
+                size: meta.size,
+                etag: meta.etag.clone(),
+                timestamp: now,
+            };
+            tokio::spawn(async move {
+                engine.publish(event).await;
+            });
+        }
+
+        Ok(meta)
     }
 
     /// **GetObject** — retrieve an object by reassembling its chunks.
@@ -136,8 +161,19 @@ impl ObjectService {
     pub async fn delete_object(&self, key: &ObjectKey) -> Result<(), ObjectError> {
         // Get manifest to find chunks (for future GC)
         let _manifest = self.manifests.get(key).await?;
+        let now = Utc::now();
         // TODO: Mark chunks for GC if no other manifest references them
         self.manifests.delete(key).await?;
+
+        if let Some(engine) = &self.stream {
+            engine
+                .publish(StreamEvent::ObjectDeleted {
+                    key: key.clone(),
+                    timestamp: now,
+                })
+                .await;
+        }
+
         Ok(())
     }
 
@@ -409,7 +445,7 @@ impl ObjectService {
         };
         self.manifests.put(manifest).await?;
 
-        Ok(ObjectMeta {
+        let meta = ObjectMeta {
             key: upload.key,
             size: total_size,
             content_type: None,
@@ -418,7 +454,20 @@ impl ObjectService {
             etag,
             created_at: now,
             updated_at: now,
-        })
+        };
+
+        if let Some(engine) = &self.stream {
+            engine
+                .publish(StreamEvent::ObjectCreated {
+                    key: meta.key.clone(),
+                    size: meta.size,
+                    etag: meta.etag.clone(),
+                    timestamp: now,
+                })
+                .await;
+        }
+
+        Ok(meta)
     }
 
     /// **AbortMultipartUpload** — cancel an in-progress multipart upload and
@@ -442,6 +491,7 @@ mod tests {
     use super::*;
     use plures_chunkstore::MemChunkStore;
     use plures_manifest::MemManifestStore;
+    use plures_stream::StreamEngine;
 
     fn test_service() -> ObjectService {
         ObjectService::new(
@@ -767,5 +817,103 @@ mod tests {
         let (_, retrieved) = svc.get_object(&"large/file.bin".into()).await.unwrap();
         assert_eq!(retrieved.len(), TOTAL_SIZE);
         assert_eq!(retrieved, full_data);
+    }
+
+    // ── Stream event tests ──────────────────────────────────────────────────
+
+    fn test_service_with_stream() -> (ObjectService, Arc<StreamEngine>) {
+        let engine = Arc::new(StreamEngine::new(64));
+        let svc = ObjectService::new(
+            Arc::new(MemChunkStore::new()),
+            Arc::new(MemManifestStore::new()),
+        )
+        .with_chunk_size(10)
+        .with_stream_engine(engine.clone());
+        (svc, engine)
+    }
+
+    #[tokio::test]
+    async fn put_object_emits_created_event() {
+        let (svc, engine) = test_service_with_stream();
+        let mut rx = engine.subscribe();
+
+        svc.put_object("events/hello.txt", bytes::Bytes::from("hello"), None)
+            .await
+            .unwrap();
+
+        let event = rx.recv().await.unwrap();
+        match event {
+            StreamEvent::ObjectCreated { key, size, .. } => {
+                assert_eq!(key.0, "events/hello.txt");
+                assert_eq!(size, 5);
+            }
+            _ => panic!("expected ObjectCreated"),
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_object_emits_deleted_event() {
+        let (svc, engine) = test_service_with_stream();
+
+        svc.put_object("events/del.txt", bytes::Bytes::from("bye"), None)
+            .await
+            .unwrap();
+
+        let mut rx = engine.subscribe();
+        svc.delete_object(&"events/del.txt".into()).await.unwrap();
+
+        let event = rx.recv().await.unwrap();
+        match event {
+            StreamEvent::ObjectDeleted { key, .. } => {
+                assert_eq!(key.0, "events/del.txt");
+            }
+            _ => panic!("expected ObjectDeleted"),
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_multipart_emits_created_event() {
+        let (svc, engine) = test_service_with_stream();
+
+        let upload_id = svc
+            .initiate_multipart_upload("events/multi.bin")
+            .await
+            .unwrap();
+        let p1 = svc
+            .upload_part(&upload_id, 1, bytes::Bytes::from("part1"))
+            .await
+            .unwrap();
+
+        let mut rx = engine.subscribe();
+        svc.complete_multipart_upload(
+            &upload_id,
+            vec![CompletePart {
+                part_number: 1,
+                etag: p1.etag,
+            }],
+        )
+        .await
+        .unwrap();
+
+        let event = rx.recv().await.unwrap();
+        match event {
+            StreamEvent::ObjectCreated { key, size, .. } => {
+                assert_eq!(key.0, "events/multi.bin");
+                assert_eq!(size, 5);
+            }
+            _ => panic!("expected ObjectCreated"),
+        }
+    }
+
+    #[tokio::test]
+    async fn no_events_without_stream_engine() {
+        let svc = test_service();
+        // Should not panic even without a stream engine attached.
+        svc.put_object("no-stream/test.txt", bytes::Bytes::from("ok"), None)
+            .await
+            .unwrap();
+        svc.delete_object(&"no-stream/test.txt".into())
+            .await
+            .unwrap();
     }
 }

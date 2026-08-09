@@ -19,6 +19,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::{
     body::Body,
     extract::Request,
@@ -65,6 +66,7 @@ impl Principal {
 /// Implement this to provide custom credential verification for the S3
 /// gateway. The default [`NoAuth`] implementation allows all requests.
 #[async_trait::async_trait]
+#[async_trait]
 pub trait AuthProvider: Send + Sync + 'static {
     /// Authenticate a request and return the [`Principal`].
     ///
@@ -127,6 +129,7 @@ impl IntoResponse for AuthError {
 pub struct NoAuth;
 
 #[async_trait::async_trait]
+#[async_trait]
 impl AuthProvider for NoAuth {
     async fn authenticate(&self, _headers: &axum::http::HeaderMap) -> Result<Principal, AuthError> {
         Ok(Principal::anonymous())
@@ -153,6 +156,7 @@ impl BearerTokenAuth {
 }
 
 #[async_trait::async_trait]
+#[async_trait]
 impl AuthProvider for BearerTokenAuth {
     async fn authenticate(&self, headers: &axum::http::HeaderMap) -> Result<Principal, AuthError> {
         let auth_header = headers
@@ -177,7 +181,7 @@ impl AuthProvider for BearerTokenAuth {
 /// [`AuthProvider`] and injects the resulting [`Principal`] into
 /// request extensions.
 pub async fn auth_middleware(
-    auth: axum::extract::State<Arc<dyn AuthProvider>>,
+    auth: Arc<dyn AuthProvider>,
     mut req: Request<Body>,
     next: Next,
 ) -> Response {
