@@ -397,6 +397,29 @@ async fn multipart_upload_part_returns_etag() {
 }
 
 #[tokio::test]
+async fn multipart_put_missing_part_number_returns_400() {
+    let (base, client) = start_server().await;
+
+    // Initiate
+    let resp = client
+        .post(format!("{base}/bucket/mp/missing-part?uploads"))
+        .send()
+        .await
+        .unwrap();
+    let upload_id = extract_upload_id(&resp.text().await.unwrap());
+
+    // Missing partNumber should be rejected.
+    let resp = client
+        .put(format!("{base}/bucket/mp/missing-part?uploadId={upload_id}"))
+        .body("partial")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn multipart_complete_assembles_object() {
     let (base, client) = start_server().await;
 
