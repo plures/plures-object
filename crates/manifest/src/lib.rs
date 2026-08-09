@@ -130,4 +130,79 @@ mod tests {
         let photos = store.list(Some("photos/")).await.unwrap();
         assert_eq!(photos.len(), 2);
     }
+
+    // ── Manifest Consistency Tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn overwrite_replaces_manifest() {
+        let store = MemManifestStore::new();
+        store.put(test_manifest("k")).await.unwrap();
+
+        let mut updated = test_manifest("k");
+        updated.total_size = 2048;
+        updated.etag = "new_etag".into();
+        store.put(updated).await.unwrap();
+
+        let m = store.get(&"k".into()).await.unwrap();
+        assert_eq!(m.total_size, 2048);
+        assert_eq!(m.etag, "new_etag");
+    }
+
+    #[tokio::test]
+    async fn manifest_preserves_all_fields() {
+        let store = MemManifestStore::new();
+        let mut manifest = test_manifest("full/fields");
+        manifest.etag = "deadbeef".into();
+        manifest.content_type = Some("image/png".into());
+        manifest.tags.insert("env".into(), "prod".into());
+        manifest.total_size = 9999;
+        store.put(manifest).await.unwrap();
+
+        let m = store.get(&"full/fields".into()).await.unwrap();
+        assert_eq!(m.etag, "deadbeef");
+        assert_eq!(m.content_type.as_deref(), Some("image/png"));
+        assert_eq!(m.tags.get("env").map(String::as_str), Some("prod"));
+        assert_eq!(m.total_size, 9999);
+    }
+
+    #[tokio::test]
+    async fn manifest_multi_part_chunk_order() {
+        let store = MemManifestStore::new();
+        let manifest = Manifest {
+            key: "mp/order".into(),
+            parts: vec![
+                ManifestPart { part_number: 1, chunks: vec![ChunkId("c1".into()), ChunkId("c2".into())], size: 200 },
+                ManifestPart { part_number: 2, chunks: vec![ChunkId("c3".into())], size: 100 },
+            ],
+            total_size: 300,
+            etag: "mp-etag".into(),
+            content_type: None,
+            tags: std::collections::HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        store.put(manifest).await.unwrap();
+
+        let m = store.get(&"mp/order".into()).await.unwrap();
+        let all: Vec<&str> = m.all_chunks().iter().map(|c| c.0.as_str()).collect();
+        assert_eq!(all, vec!["c1", "c2", "c3"]);
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_is_noop() {
+        let store = MemManifestStore::new();
+        // Should not error.
+        store.delete(&"nonexistent".into()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_after_delete_excludes_removed() {
+        let store = MemManifestStore::new();
+        store.put(test_manifest("a")).await.unwrap();
+        store.put(test_manifest("b")).await.unwrap();
+        store.delete(&"a".into()).await.unwrap();
+        let keys = store.list(None).await.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].0, "b");
+    }
 }

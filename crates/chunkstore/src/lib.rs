@@ -210,4 +210,108 @@ mod tests {
         let id2 = store.put(c2).await.unwrap();
         assert_eq!(id1, id2);
     }
+
+    // ── Chunk Integrity Tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn chunk_id_matches_content_hash() {
+        let store = MemChunkStore::new();
+        let data = b"integrity check";
+        let expected_id = ChunkId::from_data(data);
+        let chunk = Chunk::new(data.to_vec());
+        assert_eq!(chunk.id, expected_id);
+
+        let id = store.put(chunk).await.unwrap();
+        assert_eq!(id, expected_id);
+
+        let retrieved = store.get(&id).await.unwrap();
+        assert_eq!(ChunkId::from_data(&retrieved.data), expected_id);
+    }
+
+    #[tokio::test]
+    async fn fs_chunk_id_matches_content_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsChunkStore::new(dir.path().join("chunks"));
+        let data = b"fs integrity check";
+        let expected_id = ChunkId::from_data(data);
+        let chunk = Chunk::new(data.to_vec());
+        let id = store.put(chunk).await.unwrap();
+        assert_eq!(id, expected_id);
+
+        let retrieved = store.get(&id).await.unwrap();
+        assert_eq!(ChunkId::from_data(&retrieved.data), expected_id);
+    }
+
+    #[tokio::test]
+    async fn empty_chunk_put_get() {
+        let store = MemChunkStore::new();
+        let chunk = Chunk::new(Vec::new());
+        let id = store.put(chunk).await.unwrap();
+        let retrieved = store.get(&id).await.unwrap();
+        assert!(retrieved.data.is_empty());
+        assert_eq!(retrieved.size, 0);
+        assert_eq!(ChunkId::from_data(&retrieved.data), id);
+    }
+
+    #[tokio::test]
+    async fn fs_empty_chunk_put_get() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsChunkStore::new(dir.path().join("chunks"));
+        let chunk = Chunk::new(Vec::new());
+        let id = store.put(chunk).await.unwrap();
+        let retrieved = store.get(&id).await.unwrap();
+        assert!(retrieved.data.is_empty());
+        assert_eq!(retrieved.size, 0);
+    }
+
+    #[tokio::test]
+    async fn fs_corrupted_chunk_detected_via_rehash() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsChunkStore::new(dir.path().join("chunks"));
+        let chunk = Chunk::new(b"original content".to_vec());
+        let id = store.put(chunk).await.unwrap();
+
+        // Tamper with the file on disk.
+        let path = store.chunk_path(&id);
+        tokio::fs::write(&path, b"corrupted content").await.unwrap();
+
+        // Read succeeds, but the hash no longer matches the chunk ID.
+        let retrieved = store.get(&id).await.unwrap();
+        let rehash = ChunkId::from_data(&retrieved.data);
+        assert_ne!(rehash, id, "corrupted chunk should not match original hash");
+    }
+
+    #[tokio::test]
+    async fn chunk_size_field_is_accurate() {
+        let store = MemChunkStore::new();
+        for size in [0, 1, 255, 1024, 65536] {
+            let data: Vec<u8> = (0u8..=255).cycle().take(size).collect();
+            let chunk = Chunk::new(data.clone());
+            assert_eq!(chunk.size, size as u64);
+            let id = store.put(chunk).await.unwrap();
+            let retrieved = store.get(&id).await.unwrap();
+            assert_eq!(retrieved.size, size as u64);
+            assert_eq!(retrieved.data.len(), size);
+        }
+    }
+
+    #[tokio::test]
+    async fn distinct_data_produces_distinct_chunk_ids() {
+        let store = MemChunkStore::new();
+        let id1 = store.put(Chunk::new(b"alpha".to_vec())).await.unwrap();
+        let id2 = store.put(Chunk::new(b"bravo".to_vec())).await.unwrap();
+        let id3 = store.put(Chunk::new(b"alpha\0".to_vec())).await.unwrap();
+        assert_ne!(id1, id2);
+        assert_ne!(id1, id3);
+        assert_ne!(id2, id3);
+    }
+
+    #[tokio::test]
+    async fn fs_delete_nonexistent_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsChunkStore::new(dir.path().join("chunks"));
+        let id = ChunkId::from_data(b"never stored");
+        // Should not error.
+        store.delete(&id).await.unwrap();
+    }
 }

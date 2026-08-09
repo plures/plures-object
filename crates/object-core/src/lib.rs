@@ -364,4 +364,57 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("ObjectCreated"));
     }
+
+    // ── Extended Integrity / ETag / Manifest Tests ──────────────────────────
+
+    #[test]
+    fn chunk_id_is_64_hex_chars() {
+        let id = ChunkId::from_data(b"any data");
+        assert_eq!(id.0.len(), 64, "SHA-256 hex must be 64 chars");
+        assert!(id.0.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn empty_data_has_deterministic_chunk_id() {
+        let a = ChunkId::from_data(b"");
+        let b = ChunkId::from_data(b"");
+        assert_eq!(a, b);
+        // SHA-256 of empty input is a well-known constant.
+        assert_eq!(a.0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(a.0.len(), 64);
+    }
+
+    #[test]
+    fn manifest_serialization_round_trip() {
+        let m = Manifest::single(
+            "rt/key".into(),
+            vec![ChunkId("abc123".into()), ChunkId("def456".into())],
+            2048,
+            "etag_value".into(),
+            Some("text/plain".into()),
+        );
+        let json = serde_json::to_string(&m).unwrap();
+        let deserialized: Manifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.key.0, "rt/key");
+        assert_eq!(deserialized.total_size, 2048);
+        assert_eq!(deserialized.etag, "etag_value");
+        assert_eq!(deserialized.parts.len(), 1);
+        assert_eq!(deserialized.parts[0].chunks.len(), 2);
+        assert_eq!(deserialized.content_type.as_deref(), Some("text/plain"));
+    }
+
+    #[test]
+    fn manifest_all_chunks_returns_empty_for_no_parts() {
+        let m = Manifest {
+            key: "empty".into(),
+            parts: vec![],
+            total_size: 0,
+            etag: String::new(),
+            content_type: None,
+            tags: std::collections::HashMap::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert!(m.all_chunks().is_empty());
+    }
 }

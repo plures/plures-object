@@ -819,6 +819,279 @@ mod tests {
         assert_eq!(retrieved, full_data);
     }
 
+    // ── ETag Correctness Tests ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn etag_stable_across_get_and_head() {
+        let svc = test_service();
+        let data = bytes::Bytes::from_static(b"etag stability test");
+        let put_meta = svc.put_object("etag/stable", data, None).await.unwrap();
+
+        let (get_meta, _) = svc.get_object(&"etag/stable".into()).await.unwrap();
+        let head_meta = svc.head_object(&"etag/stable".into()).await.unwrap();
+
+        assert_eq!(put_meta.etag, get_meta.etag);
+        assert_eq!(put_meta.etag, head_meta.etag);
+    }
+
+    #[tokio::test]
+    async fn etag_deterministic_for_same_content() {
+        let svc = test_service();
+        let data = bytes::Bytes::from_static(b"deterministic etag");
+        let m1 = svc.put_object("det/1", data.clone(), None).await.unwrap();
+        let m2 = svc.put_object("det/2", data, None).await.unwrap();
+        assert_eq!(m1.etag, m2.etag, "same content must produce same ETag");
+    }
+
+    #[tokio::test]
+    async fn etag_differs_for_different_content() {
+        let svc = test_service();
+        let m1 = svc.put_object("diff/a", bytes::Bytes::from_static(b"aaa"), None).await.unwrap();
+        let m2 = svc.put_object("diff/b", bytes::Bytes::from_static(b"bbb"), None).await.unwrap();
+        assert_ne!(m1.etag, m2.etag);
+    }
+
+    #[tokio::test]
+    async fn singlepart_etag_has_no_dash_suffix() {
+        let svc = test_service();
+        let meta = svc.put_object("single/e", bytes::Bytes::from_static(b"no dash"), None).await.unwrap();
+        assert!(!meta.etag.contains('-'), "single-part ETag must not contain '-'");
+    }
+
+    #[tokio::test]
+    async fn multipart_etag_format_is_hash_dash_count() {
+        let svc = test_service();
+        let uid = svc.initiate_multipart_upload("mp/etag-fmt").await.unwrap();
+        let p1 = svc.upload_part(&uid, 1, bytes::Bytes::from_static(b"aaa")).await.unwrap();
+        let p2 = svc.upload_part(&uid, 2, bytes::Bytes::from_static(b"bbb")).await.unwrap();
+        let p3 = svc.upload_part(&uid, 3, bytes::Bytes::from_static(b"ccc")).await.unwrap();
+
+        let meta = svc.complete_multipart_upload(&uid, vec![
+            CompletePart { part_number: 1, etag: p1.etag },
+            CompletePart { part_number: 2, etag: p2.etag },
+            CompletePart { part_number: 3, etag: p3.etag },
+        ]).await.unwrap();
+
+        assert!(meta.etag.ends_with("-3"), "multipart ETag must end with -<part_count>");
+        let parts: Vec<&str> = meta.etag.splitn(2, '-').collect();
+        assert_eq!(parts[0].len(), 64, "hash prefix must be 64 hex chars (SHA-256)");
+        assert!(parts[0].chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn multipart_etag_depends_on_part_content() {
+        let svc = test_service();
+
+        // Upload A with parts "aaa", "bbb"
+        let uid_a = svc.initiate_multipart_upload("mp/etag-a").await.unwrap();
+        let p1a = svc.upload_part(&uid_a, 1, bytes::Bytes::from_static(b"aaa")).await.unwrap();
+        let p2a = svc.upload_part(&uid_a, 2, bytes::Bytes::from_static(b"bbb")).await.unwrap();
+        let meta_a = svc.complete_multipart_upload(&uid_a, vec![
+            CompletePart { part_number: 1, etag: p1a.etag },
+            CompletePart { part_number: 2, etag: p2a.etag },
+        ]).await.unwrap();
+
+        // Upload B with parts "aaa", "ccc"
+        let uid_b = svc.initiate_multipart_upload("mp/etag-b").await.unwrap();
+        let p1b = svc.upload_part(&uid_b, 1, bytes::Bytes::from_static(b"aaa")).await.unwrap();
+        let p2b = svc.upload_part(&uid_b, 2, bytes::Bytes::from_static(b"ccc")).await.unwrap();
+        let meta_b = svc.complete_multipart_upload(&uid_b, vec![
+            CompletePart { part_number: 1, etag: p1b.etag },
+            CompletePart { part_number: 2, etag: p2b.etag },
+        ]).await.unwrap();
+
+        assert_ne!(meta_a.etag, meta_b.etag, "different part content must produce different multipart ETags");
+    }
+
+    #[tokio::test]
+    async fn multipart_etag_deterministic_for_same_parts() {
+        let svc = test_service();
+
+        let mut etags = Vec::new();
+        for key in ["mp/det1", "mp/det2"] {
+            let uid = svc.initiate_multipart_upload(key).await.unwrap();
+            let p1 = svc.upload_part(&uid, 1, bytes::Bytes::from_static(b"part1")).await.unwrap();
+            let p2 = svc.upload_part(&uid, 2, bytes::Bytes::from_static(b"part2")).await.unwrap();
+            let meta = svc.complete_multipart_upload(&uid, vec![
+                CompletePart { part_number: 1, etag: p1.etag },
+                CompletePart { part_number: 2, etag: p2.etag },
+            ]).await.unwrap();
+            etags.push(meta.etag);
+        }
+
+        assert_eq!(etags[0], etags[1], "same parts must produce same multipart ETag");
+    }
+
+    #[tokio::test]
+    async fn overwrite_updates_etag() {
+        let svc = test_service();
+        let m1 = svc.put_object("ow/e", bytes::Bytes::from_static(b"version1"), None).await.unwrap();
+        let m2 = svc.put_object("ow/e", bytes::Bytes::from_static(b"version2"), None).await.unwrap();
+        assert_ne!(m1.etag, m2.etag, "overwrite with different data must change ETag");
+
+        let (get_meta, _) = svc.get_object(&"ow/e".into()).await.unwrap();
+        assert_eq!(get_meta.etag, m2.etag, "get after overwrite must return new ETag");
+    }
+
+    #[tokio::test]
+    async fn complete_multipart_duplicate_part_number_errors() {
+        let svc = test_service();
+        let uid = svc.initiate_multipart_upload("mp/dup-pn").await.unwrap();
+        let p1 = svc.upload_part(&uid, 1, bytes::Bytes::from_static(b"data")).await.unwrap();
+
+        let result = svc.complete_multipart_upload(&uid, vec![
+            CompletePart { part_number: 1, etag: p1.etag.clone() },
+            CompletePart { part_number: 1, etag: p1.etag },
+        ]).await;
+        assert!(result.is_err(), "duplicate part numbers should error");
+    }
+
+    // ── Manifest Consistency Tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn manifest_chunk_ids_match_stored_chunks() {
+        let chunks = Arc::new(MemChunkStore::new());
+        let svc = ObjectService::new(
+            chunks.clone(),
+            Arc::new(MemManifestStore::new()),
+        ).with_chunk_size(10);
+
+        let data = bytes::Bytes::from_static(b"0123456789abcdef"); // 16 bytes → 2 chunks
+        let meta = svc.put_object("verify/chunks", data, None).await.unwrap();
+
+        // Every chunk ID in the metadata must exist in the chunk store.
+        for chunk_id in &meta.chunks {
+            assert!(chunks.exists(chunk_id).await.unwrap(), "chunk {chunk_id} must exist");
+        }
+    }
+
+    #[tokio::test]
+    async fn manifest_total_size_equals_sum_of_chunks() {
+        let chunks = Arc::new(MemChunkStore::new());
+        let svc = ObjectService::new(
+            chunks.clone(),
+            Arc::new(MemManifestStore::new()),
+        ).with_chunk_size(10);
+
+        let data = bytes::Bytes::from("abcdefghijklmnopqrstuvwxyz".as_bytes().to_vec()); // 26 bytes
+        let meta = svc.put_object("size/check", data.clone(), None).await.unwrap();
+
+        let mut total_chunk_bytes = 0u64;
+        for chunk_id in &meta.chunks {
+            let chunk = chunks.get(chunk_id).await.unwrap();
+            total_chunk_bytes += chunk.size;
+        }
+        assert_eq!(total_chunk_bytes, meta.size);
+        assert_eq!(meta.size, data.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn manifest_round_trip_preserves_data() {
+        let svc = test_service();
+        let data = bytes::Bytes::from(vec![0xAB; 35]); // 35 bytes of 0xAB
+        svc.put_object("rt/data", data.clone(), Some("application/octet-stream".into())).await.unwrap();
+
+        let (meta, retrieved) = svc.get_object(&"rt/data".into()).await.unwrap();
+        assert_eq!(retrieved, data, "round-trip data must be identical");
+        assert_eq!(meta.content_type.as_deref(), Some("application/octet-stream"));
+    }
+
+    #[tokio::test]
+    async fn multipart_manifest_chunk_order_matches_parts() {
+        let chunks = Arc::new(MemChunkStore::new());
+        let manifests = Arc::new(MemManifestStore::new());
+        let svc = ObjectService::new(chunks.clone(), manifests.clone()).with_chunk_size(1024);
+
+        let uid = svc.initiate_multipart_upload("mp/order").await.unwrap();
+        let part1_data = bytes::Bytes::from_static(b"FIRST");
+        let part2_data = bytes::Bytes::from_static(b"SECOND");
+        let p1 = svc.upload_part(&uid, 1, part1_data.clone()).await.unwrap();
+        let p2 = svc.upload_part(&uid, 2, part2_data.clone()).await.unwrap();
+
+        svc.complete_multipart_upload(&uid, vec![
+            CompletePart { part_number: 1, etag: p1.etag },
+            CompletePart { part_number: 2, etag: p2.etag },
+        ]).await.unwrap();
+
+        // Read manifest directly and verify chunk order yields correct reassembly.
+        let manifest = manifests.get(&"mp/order".into()).await.unwrap();
+        assert_eq!(manifest.parts.len(), 2);
+        assert_eq!(manifest.parts[0].part_number, 1);
+        assert_eq!(manifest.parts[1].part_number, 2);
+
+        let mut assembled = Vec::new();
+        for chunk_id in manifest.all_chunks() {
+            let chunk = chunks.get(chunk_id).await.unwrap();
+            assembled.extend_from_slice(&chunk.data);
+        }
+        assert_eq!(&assembled, b"FIRSTSECOND");
+    }
+
+    #[tokio::test]
+    async fn overwrite_manifest_reflects_new_data() {
+        let manifests = Arc::new(MemManifestStore::new());
+        let svc = ObjectService::new(
+            Arc::new(MemChunkStore::new()),
+            manifests.clone(),
+        ).with_chunk_size(10);
+
+        svc.put_object("ow/m", bytes::Bytes::from_static(b"old"), None).await.unwrap();
+        let old_manifest = manifests.get(&"ow/m".into()).await.unwrap();
+
+        svc.put_object("ow/m", bytes::Bytes::from_static(b"new content"), None).await.unwrap();
+        let new_manifest = manifests.get(&"ow/m".into()).await.unwrap();
+
+        assert_ne!(old_manifest.etag, new_manifest.etag);
+        assert_ne!(old_manifest.total_size, new_manifest.total_size);
+    }
+
+    #[tokio::test]
+    async fn manifest_etag_matches_metadata_etag() {
+        let manifests = Arc::new(MemManifestStore::new());
+        let svc = ObjectService::new(
+            Arc::new(MemChunkStore::new()),
+            manifests.clone(),
+        ).with_chunk_size(10);
+
+        let put_meta = svc.put_object("etag/match", bytes::Bytes::from_static(b"check"), None).await.unwrap();
+        let manifest = manifests.get(&"etag/match".into()).await.unwrap();
+        assert_eq!(manifest.etag, put_meta.etag, "manifest ETag must match returned metadata ETag");
+    }
+
+    #[tokio::test]
+    async fn empty_object_round_trip() {
+        let svc = test_service();
+        let meta = svc.put_object("empty/obj", bytes::Bytes::new(), None).await.unwrap();
+        assert_eq!(meta.size, 0);
+        assert!(meta.chunks.is_empty());
+
+        let (get_meta, data) = svc.get_object(&"empty/obj".into()).await.unwrap();
+        assert!(data.is_empty());
+        assert_eq!(get_meta.etag, meta.etag);
+    }
+
+    #[tokio::test]
+    async fn multipart_parts_submitted_out_of_order() {
+        let svc = test_service();
+        let uid = svc.initiate_multipart_upload("mp/ooo").await.unwrap();
+
+        // Upload part 3 first, then 1, then 2.
+        let p3 = svc.upload_part(&uid, 3, bytes::Bytes::from_static(b"CCC")).await.unwrap();
+        let p1 = svc.upload_part(&uid, 1, bytes::Bytes::from_static(b"AAA")).await.unwrap();
+        let p2 = svc.upload_part(&uid, 2, bytes::Bytes::from_static(b"BBB")).await.unwrap();
+
+        // Complete with parts listed out of order — service should sort them.
+        let meta = svc.complete_multipart_upload(&uid, vec![
+            CompletePart { part_number: 3, etag: p3.etag },
+            CompletePart { part_number: 1, etag: p1.etag },
+            CompletePart { part_number: 2, etag: p2.etag },
+        ]).await.unwrap();
+
+        assert!(meta.etag.ends_with("-3"));
+        let (_, data) = svc.get_object(&"mp/ooo".into()).await.unwrap();
+        assert_eq!(&*data, b"AAABBBCCC", "parts must be assembled in part_number order");
+    }
+
     // ── Stream event tests ──────────────────────────────────────────────────
 
     fn test_service_with_stream() -> (ObjectService, Arc<StreamEngine>) {
