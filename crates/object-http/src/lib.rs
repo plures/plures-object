@@ -39,6 +39,7 @@
 //! }
 //! ```
 
+pub mod auth;
 pub mod error;
 pub mod handlers;
 pub mod xml;
@@ -46,10 +47,13 @@ pub mod xml;
 use std::sync::Arc;
 
 use axum::{
+    middleware,
     routing::{delete, get, head, post, put},
     Router,
 };
 use plures_object_store::ObjectService;
+
+use auth::{auth_middleware, AuthProvider, NoAuth};
 
 use handlers::{delete_object_or_upload, get_object, head_object, list_objects, post_object, put_object_or_part, AppState};
 
@@ -67,6 +71,14 @@ use handlers::{delete_object_or_upload, get_object, head_object, list_objects, p
 /// let app = axum::Router::new().nest("/s3", make_router(svc));
 /// ```
 pub fn make_router(service: Arc<ObjectService>) -> Router {
+    make_router_with_auth(service, Arc::new(NoAuth))
+}
+
+/// Build the S3-compatible axum [`Router`] with a custom [`AuthProvider`].
+pub fn make_router_with_auth(
+    service: Arc<ObjectService>,
+    auth: Arc<dyn AuthProvider>,
+) -> Router {
     let state: AppState = service;
 
     Router::new()
@@ -78,5 +90,9 @@ pub fn make_router(service: Arc<ObjectService>) -> Router {
         .route("/{bucket}/{*key}", post(post_object))
         // Bucket-level list route
         .route("/{bucket}", get(list_objects))
+        .layer(middleware::from_fn(move |req, next| {
+            let auth = auth.clone();
+            async move { auth_middleware(auth, req, next).await }
+        }))
         .with_state(state)
 }
