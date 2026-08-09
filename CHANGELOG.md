@@ -1,3 +1,10 @@
+## [0.11.1] — 2026-08-09
+
+- Merge pull request #18 from plures/copilot/expand-tests-chunk-integrity-etag-manifest (2b0d3ee)
+- fix: resolve merge conflicts with origin/main (09225ae)
+- test: expand tests for chunk integrity, ETag correctness, manifest consistency (49e5bf8)
+- Initial plan (488d32b)
+
 ## [0.11.0] — 2026-08-09
 
 - Merge pull request #15 from plures/copilot/implement-multipart-upload-support (6bc6ba2)
