@@ -117,15 +117,16 @@ impl ObjectService {
             updated_at: now,
         };
 
-        if let Some(engine) = &self.stream {
-            engine
-                .publish(StreamEvent::ObjectCreated {
-                    key: meta.key.clone(),
-                    size: meta.size,
-                    etag: meta.etag.clone(),
-                    timestamp: now,
-                })
-                .await;
+        if let Some(engine) = self.stream.clone() {
+            let event = StreamEvent::ObjectCreated {
+                key: meta.key.clone(),
+                size: meta.size,
+                etag: meta.etag.clone(),
+                timestamp: now,
+            };
+            tokio::spawn(async move {
+                engine.publish(event).await;
+            });
         }
 
         Ok(meta)
