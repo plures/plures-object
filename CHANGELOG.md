@@ -1,3 +1,11 @@
+## [0.11.0] — 2026-08-09
+
+- Merge pull request #15 from plures/copilot/implement-multipart-upload-support (6bc6ba2)
+- Potential fix for pull request finding (4c9b0e7)
+- Potential fix for pull request finding (f3d3e71)
+- fix: address code review feedback for multipart handlers (c5a5bc3)
+- feat: implement multipart upload HTTP endpoints with staging + completion (1fae4c8)
+
 ## [0.10.0] — 2026-08-09
 
 - Merge pull request #16 from plures/copilot/emit-streaming-events-for-operations (182ad7c)
