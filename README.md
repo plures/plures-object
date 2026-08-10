@@ -33,7 +33,10 @@
 | `plures-object-core` | Shared types, traits, error types |
 | `plures-chunkstore` | Content-addressed blob storage (fs + memory) |
 | `plures-manifest` | Object-to-chunk manifest storage |
-| `plures-object-store` | Object service (PutObject, GetObject, etc.) |
+| `plures-manifest-db` | PluresDB graph-native manifest backend (CRDT, version history) |
+| `plures-object-store` | Object service (PutObject, GetObject, multipart) |
+| `plures-object-http` | S3-compatible HTTP API gateway (axum) |
+| `plures-object-cli` | CLI binary (`plures-object serve`) |
 | `plures-stream` | Event streaming engine |
 
 ## On-Disk Layout
@@ -94,12 +97,13 @@ async fn main() {
 
 ## Milestones
 
-1. ✅ Core storage + metadata (this commit)
-2. ⬜ Multipart upload support
-3. ⬜ S3 HTTP API layer (axum)
-4. ⬜ PluresDB metadata backend (replace MemManifestStore)
-5. ⬜ Hyperswarm replication via Stream Engine
-6. ⬜ Garbage collection for orphaned chunks
+1. ✅ Core storage + metadata
+2. ✅ Multipart upload support
+3. ✅ S3 HTTP API layer (axum)
+4. ✅ PluresDB metadata backend (graph-native CRDT manifest store)
+5. ✅ Streaming event bus
+6. ⬜ Hyperswarm replication via Stream Engine
+7. ⬜ Garbage collection for orphaned chunks
 
 ## Part of the Plures Ecosystem
 
