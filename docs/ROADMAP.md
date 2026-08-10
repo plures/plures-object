@@ -12,7 +12,7 @@ Phase 1 is complete. The S3‑compatible API surface is fully implemented with m
 - ✅ Implement multipart upload support with staging + completion flow.
 - ✅ Add S3 HTTP API gateway (axum) with XML error responses.
 - ✅ Wire PluresDB manifest backend (graph‑native, CRDT, version history).
-- ✅ Emit streaming events for object operations (create, delete, chunk, replication).
+- ✅ Emit streaming events for object operations (create, delete).
 - ✅ Expand tests for chunk integrity, ETag correctness, and manifest consistency.
 - ✅ Add CLI (`plures-object serve`) for running the gateway.
 
