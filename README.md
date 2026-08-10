@@ -33,7 +33,7 @@
 | `plures-object-core` | Shared types, traits, error types |
 | `plures-chunkstore` | Content-addressed blob storage (fs + memory) |
 | `plures-manifest` | Object-to-chunk manifest storage |
-| `plures-manifest-db` | PluresDB graph-native manifest backend (CRDT, version history) |
+| `plures-manifest-db` | Graph-native manifest backend (filesystem; CRDT-style version history) |
 | `plures-object-store` | Object service (PutObject, GetObject, multipart) |
 | `plures-object-http` | S3-compatible HTTP API gateway (axum) |
 | `plures-object-cli` | CLI binary (`plures-object serve`) |
