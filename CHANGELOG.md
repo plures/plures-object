@@ -1,3 +1,14 @@
+## [0.12.0] — 2026-08-10
+
+- Merge pull request #17 from plures/copilot/add-s3-http-api-gateway (3f0be78)
+- Merge pull request #18 from plures/copilot/expand-tests-chunk-integrity-etag-manifest (2b0d3ee)
+- fix: resolve merge conflicts with main branch (93e209e)
+- fix: resolve merge conflicts with origin/main (09225ae)
+- refactor: address code review feedback (d39ece2)
+- test: expand tests for chunk integrity, ETag correctness, manifest consistency (49e5bf8)
+- feat: add S3 HTTP API gateway auth hooks and multipart upload endpoints (f9f6eda)
+- Initial plan (488d32b)
+
 ## [0.11.0] — 2026-08-09
 
 - Merge pull request #15 from plures/copilot/implement-multipart-upload-support (6bc6ba2)
