@@ -4,7 +4,7 @@
 plures-object is OASIS’s content distribution and storage layer. Privacy‑preserving commerce depends on durable, content‑addressed objects that can be replicated peer‑to‑peer with verifiable integrity. This repo provides the S3‑compatible object API, chunked storage, and streaming events that let OASIS publish, move, and verify assets across nodes without centralized trust.
 
 ## Current State
-Phase 1 is complete. The S3‑compatible API surface is fully implemented with multipart upload, HTTP gateway (axum), PluresDB‑backed manifest storage with CRDT version history, and a streaming event bus. All core crates compile cleanly and pass 70+ tests covering chunk integrity, ETag correctness, multipart lifecycle, and manifest consistency.
+Phase 1 is complete. The S3‑compatible API surface is fully implemented with multipart upload, HTTP gateway (axum), graph‑native manifest storage (`plures-manifest-db` / `FsManifestStore`) with CRDT-style version history, and a streaming event bus. All core crates compile cleanly and pass 70+ tests covering chunk integrity, ETag correctness, multipart lifecycle, and manifest consistency.
 
 ## Milestones
 
